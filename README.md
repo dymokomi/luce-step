@@ -8,6 +8,15 @@ These convenience APIs return `three.PolygonMesh` by tessellating a CAD model.
 surface ownership and trim semantics belong to `luce-cad`; numerical surface
 sampling belongs to `luce-tesselator`.
 
+All four APIs accept an optional `tolerance` argument. `0` (default) uses the
+file's declared length uncertainty, with the existing `1e-6` fallback. A positive
+value from `1e-9` through `1` explicitly replaces it, in **source coordinate
+units**. The chosen value is retained by the CAD model for edge agreement and
+trim projection during preview and tessellation. This is not a tessellation
+edge-length or polygon-density control, automatic healing, or unit conversion.
+For example, `Step.load_model(path, tolerance=0.0001)` imports with that specific
+boundary tolerance; an explicit tighter value also overrides a looser file value.
+
 Current supported subset:
 
 - Faceted `FACE`/`POLY_LOOP` geometry.
@@ -41,7 +50,7 @@ vertices/edges, 64 trim loops, and the separate luce-3d polygon-mesh budgets.
 Curves may have 256 controls; NURBS surfaces are bounded to 1,024 per direction
 and 262,144 controls total. Entity allocation follows a counted preflight;
 topology references use hashed lookup. Spline trim endpoints must still agree
-within the file's declared tolerance; automatic tolerance healing is not enabled.
+within the chosen import tolerance; automatic tolerance healing is not enabled.
 Uniform surface sampling is not a tolerance-controlled CAD tessellator.
 
 Tests run through sibling `luced-3d/tests/run.py`. The external-file probe

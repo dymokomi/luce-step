@@ -40,15 +40,21 @@ struct IdMap:
         free(self.values) in memory.heap
 
 
-pub func read_brep(data: Document, model: interop.Reference[CadModel]) -> !:
+pub func read_brep(data: Document, model: interop.Reference[CadModel], tolerance_override: f64 = 0.0) -> !:
     var tolerance: f64 = 0.000001
+    var declared = false
     for entity in data.records[..<data.count]:
         if entity.kind == "UNCERTAINTY_MEASURE_WITH_UNIT":
             let measure = try arg(entity.args, 0)
             if strings.starts_with(measure, "LENGTH_MEASURE("):
                 let value = try strings.parse_f64(try component(measure, "LENGTH_MEASURE("))
-                if value > tolerance:
+                # The default is a fallback, not a floor: a file may request
+                # stricter agreement than 1e-6. Multiple declared contexts keep
+                # the existing conservative maximum until units are scoped.
+                if value > 0.0 and (not declared or value > tolerance):
                     tolerance = value
+                    declared = true
+    if tolerance_override > 0.0: tolerance = tolerance_override
     let boundary = try interop.Reference[BrepModel].adopt(new BrepModel(tolerance) in memory.heap, brep_model_type, memory.heap)
     defer boundary.release()
     var vertices = try IdMap()
