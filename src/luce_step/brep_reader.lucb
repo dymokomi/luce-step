@@ -1,0 +1,218 @@
+## STEP topology decoding only. Curve evaluation and meshing belong to CAD.
+import interop
+import ownership
+import memory
+import strings
+from three import Vector3, invalid
+from cad import CadModel, BrepModel, brep_model_type
+from luce_step.document import Document, Entity, arg, inner, count_args, ref_id, integer, knots, component
+from luce_step.colors import apply_colors
+from luce_step.placements import placement
+from luce_step.assemblies import apply_placements
+from luce_step.hierarchy import apply_hierarchy
+
+struct IdMap:
+    let ids: i64[]
+    let values: i64[]
+    var count: usize = 0
+    func init() -> !:
+        self.count = 0
+        self.ids = try alloc i64[131072] in memory.heap
+        errdefer free(self.ids) in memory.heap
+        self.values = try alloc i64[131072] in memory.heap
+        for index in 0..<self.ids.length: self.ids[index] = -1
+    mutating func put(id: i64, value: i64) -> !:
+        if self.count >= self.ids.length // 2:
+            error(invalid, "STEP topology map limit exceeded")
+        var slot = (usize)id % self.ids.length
+        while self.ids[slot] >= 0 and self.ids[slot] != id: slot = (slot + 1) % self.ids.length
+        self.ids[slot] = id
+        self.values[slot] = value
+        self.count += 1
+    func get(id: i64) -> i64!:
+        var slot = (usize)id % self.ids.length
+        while self.ids[slot] >= 0:
+            if self.ids[slot] == id: return self.values[slot]
+            slot = (slot + 1) % self.ids.length
+        error(invalid, "STEP topology reference is missing")
+    mutating func close():
+        free(self.ids) in memory.heap
+        free(self.values) in memory.heap
+
+
+pub func read_brep(data: Document, model: interop.Reference[CadModel]) -> !:
+    var tolerance: f64 = 0.000001
+    for entity in data.records[..<data.count]:
+        if entity.kind == "UNCERTAINTY_MEASURE_WITH_UNIT":
+            let measure = try arg(entity.args, 0)
+            if strings.starts_with(measure, "LENGTH_MEASURE("):
+                let value = try strings.parse_f64(try component(measure, "LENGTH_MEASURE("))
+                if value > tolerance:
+                    tolerance = value
+    let boundary = try interop.Reference[BrepModel].adopt(new BrepModel(tolerance) in memory.heap, brep_model_type, memory.heap)
+    defer boundary.release()
+    var vertices = try IdMap()
+    defer vertices.close()
+    var edges = try IdMap()
+    defer edges.close()
+    var surfaces = try IdMap()
+    defer surfaces.close()
+    var face_ids: i64[8192]
+    var face_count: usize = 0
+    for entity in data.records[..<data.count]:
+        if entity.kind == "MAPPED_ITEM" or entity.kind == "REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION":
+            error(invalid, "STEP assembly placements are not supported yet")
+        if entity.kind == "FACE" or entity.kind == "ORIENTED_FACE" or entity.kind == "ORIENTED_CLOSED_SHELL" or entity.kind == "BREP_WITH_VOIDS":
+            error(invalid, "unsupported mixed/oriented STEP shell topology")
+        if entity.kind == "VERTEX_POINT":
+            try vertices.put(entity.id, try boundary.value().add_vertex(try data.point(try ref_id(try arg(entity.args, 1)))))
+    for entity in data.records[..<data.count]:
+        if entity.kind != "EDGE_CURVE":
+            continue
+        let first = try vertices.get(try ref_id(try arg(entity.args, 1)))
+        let last = try vertices.get(try ref_id(try arg(entity.args, 2)))
+        let curve = try data.get(try ref_id(try arg(entity.args, 3)))
+        let sense = (try arg(entity.args, 4)) == ".T."
+        var index: i64 = -1
+        if curve.kind == "LINE":
+            index = try boundary.value().add_line(first, last)
+        elif curve.kind == "CIRCLE" or curve.kind == "ELLIPSE":
+            let frame = try placement(data, try arg(curve.args, 1))
+            let major = try strings.parse_f64(try arg(curve.args, 2))
+            if curve.kind == "CIRCLE":
+                index = try boundary.value().add_circle(first, last, frame.origin, frame.axis, frame.reference, major, sense)
+            else:
+                index = try boundary.value().add_ellipse(first, last, frame.origin, frame.axis, frame.reference, major, try strings.parse_f64(try arg(curve.args, 3)), sense)
+        elif curve.kind == "B_SPLINE_CURVE_WITH_KNOTS" or (curve.kind == "COMPLEX" and strings.contains(curve.args, "B_SPLINE_CURVE(")):
+            let complex = curve.kind == "COMPLEX"
+            let spline = try component(curve.args, "B_SPLINE_CURVE(") if complex else curve.args
+            let offset: usize = 0 if complex else 1
+            let controls = try inner(try arg(spline, offset + 1))
+            let count = try count_args(controls)
+            if count < 2 or count > 256:
+                error(invalid, "STEP spline edge control point limit exceeded")
+            let points = try alloc Vector3[count] in memory.heap
+            defer free(points) in memory.heap
+            let weights = try alloc f64[count] in memory.heap
+            defer free(weights) in memory.heap
+            let rational = complex and strings.contains(curve.args, "RATIONAL_B_SPLINE_CURVE(")
+            let weight_values = try inner(try arg(try component(curve.args, "RATIONAL_B_SPLINE_CURVE("), 0)) if rational else ""
+            if rational and (try count_args(weight_values)) != count:
+                error(invalid, "STEP rational curve weight count mismatch")
+            for at in 0..<count:
+                points[at] = try data.point(try ref_id(try arg(controls, at)))
+                weights[at] = try strings.parse_f64(try arg(weight_values, at)) if rational else 1.0
+            let kd = try component(curve.args, "B_SPLINE_CURVE_WITH_KNOTS(") if complex else curve.args
+            let ko: usize = 0 if complex else 6
+            let expanded = try knots(try arg(kd, ko), try arg(kd, ko + 1))
+            defer free(expanded) in memory.heap
+            index = boundary.value().add_spline_edge(first, last, points, weights, try integer(try arg(spline, offset)), expanded, sense) catch failure:
+                var buffer: u8[512]
+                let message = try interop.copy_text(try format(buffer, f"STEP edge #{entity.id}, curve #{curve.id}: {failure.message}"))
+                if let owner = message.owner: discard(ownership.pool_object(owner))
+                error(failure.code, message.value)
+        else:
+            error(invalid, "unsupported STEP boundary curve")
+        try edges.put(entity.id, index)
+    for entity in data.records[..<data.count]:
+        if entity.kind != "ADVANCED_FACE" and entity.kind != "FACE_SURFACE":
+            continue
+        let surface = try data.get(try ref_id(try arg(entity.args, 2)))
+        # A surface can be shared by several trimmed faces.
+        var surface_index: i64 = -1
+        surface_index = surfaces.get(surface.id) catch failure:
+            recover -1
+        if surface_index < 0:
+            surface_index = try read_surface(data, surface, boundary)
+            try surfaces.put(surface.id, surface_index)
+        let bounds = try inner(try arg(entity.args, 1))
+        let count = try count_args(bounds)
+        if count == 0 or count > 64:
+            error(invalid, "STEP face boundary limit exceeded")
+        var uses: i64[1024]
+        var sizes: i64[64]
+        var total: usize = 0
+        var loops: usize = 0
+        # FACE_OUTER_BOUND is not required to occur first in a STEP SET.
+        for pass in 0..<2:
+            for at in 0..<count:
+                let bound = try data.get(try ref_id(try arg(bounds, at)))
+                let outer = bound.kind == "FACE_OUTER_BOUND"
+                if not outer and bound.kind != "FACE_BOUND":
+                    error(invalid, "invalid STEP face boundary")
+                if outer != (pass == 0):
+                    continue
+                if outer and loops != 0:
+                    error(invalid, "multiple STEP outer boundaries")
+                if not outer and loops == 0:
+                    error(invalid, "STEP face has no explicit outer boundary")
+                let loop = try data.get(try ref_id(try arg(bound.args, 1)))
+                if loop.kind != "EDGE_LOOP":
+                    error(invalid, "STEP advanced face requires edge loops")
+                let members = try inner(try arg(loop.args, 1))
+                let length = try count_args(members)
+                if length == 0 or total + length > uses.length:
+                    error(invalid, "STEP edge use limit exceeded")
+                let forward = (try arg(bound.args, 2)) == ".T."
+                for item in 0..<length:
+                    let oriented = try data.get(try ref_id(try arg(members, item)))
+                    if oriented.kind != "ORIENTED_EDGE":
+                        error(invalid, "invalid STEP oriented edge")
+                    let edge = (try edges.get(try ref_id(try arg(oriented.args, 3)))) + 1
+                    let positive = ((try arg(oriented.args, 4)) == ".T.") == forward
+                    uses[total + (item if forward else length - 1 - item)] = edge if positive else -edge
+                sizes[loops] = (i64)length
+                loops += 1
+                total += length
+        discard(try boundary.value().add_face(surface_index, uses[..<total], sizes[..<loops], (try arg(entity.args, 3)) == ".T."))
+        face_ids[face_count] = entity.id
+        face_count += 1
+    try apply_colors(data, boundary, face_ids[..<face_count])
+    try apply_placements(data, boundary, face_ids[..<face_count])
+    try apply_hierarchy(data, boundary, face_ids[..<face_count])
+    try model.value().attach_brep(boundary)
+
+func read_surface(data: Document, entity: Entity, boundary: interop.Reference[BrepModel]) -> i64!:
+    if entity.kind == "PLANE" or entity.kind == "CYLINDRICAL_SURFACE" or entity.kind == "CONICAL_SURFACE" or entity.kind == "SPHERICAL_SURFACE" or entity.kind == "TOROIDAL_SURFACE":
+        let frame = try placement(data, try arg(entity.args, 1))
+        let kind: i64 = 0 if entity.kind == "PLANE" else (1 if entity.kind == "CYLINDRICAL_SURFACE" else (2 if entity.kind == "CONICAL_SURFACE" else (4 if entity.kind == "SPHERICAL_SURFACE" else 5)))
+        let radius = try strings.parse_f64(try arg(entity.args, 2)) if kind > 0 else 0.0
+        let angle = try strings.parse_f64(try arg(entity.args, 3)) if kind == 2 or kind == 5 else 0.0
+        return try boundary.value().add_surface(kind, frame.origin, frame.axis, frame.reference, radius, angle)
+    let complex = entity.kind == "COMPLEX" and strings.contains(entity.args, "B_SPLINE_SURFACE(")
+    if entity.kind != "B_SPLINE_SURFACE_WITH_KNOTS" and not complex:
+        error(invalid, "unsupported STEP B-rep surface")
+    let spline = try component(entity.args, "B_SPLINE_SURFACE(") if complex else entity.args
+    let offset: usize = 0 if complex else 1
+    let du = try integer(try arg(spline, offset))
+    let dv = try integer(try arg(spline, offset + 1))
+    let rows = try inner(try arg(spline, offset + 2))
+    let nu = try count_args(rows)
+    let nv = try count_args(try inner(try arg(rows, 0)))
+    if nu < 2 or nu > 1024 or nv < 2 or nv > 1024 or nu * nv > 262144:
+        error(invalid, "STEP spline surface control net limit exceeded")
+    let points = try alloc Vector3[nu * nv] in memory.heap
+    defer free(points) in memory.heap
+    let weights = try alloc f64[nu * nv] in memory.heap
+    defer free(weights) in memory.heap
+    let rational = complex and strings.contains(entity.args, "RATIONAL_B_SPLINE_SURFACE(")
+    let weight_rows = try inner(try arg(try component(entity.args, "RATIONAL_B_SPLINE_SURFACE("), 0)) if rational else ""
+    if rational and (try count_args(weight_rows)) != nu:
+        error(invalid, "STEP rational weight row count mismatch")
+    for u in 0..<nu:
+        let row = try inner(try arg(rows, u))
+        if (try count_args(row)) != nv:
+            error(invalid, "STEP control net is not rectangular")
+        let wr = try inner(try arg(weight_rows, u)) if rational else ""
+        if rational and (try count_args(wr)) != nv:
+            error(invalid, "STEP rational weight column count mismatch")
+        for v in 0..<nv:
+            points[u * nv + v] = try data.point(try ref_id(try arg(row, v)))
+            weights[u * nv + v] = try strings.parse_f64(try arg(wr, v)) if rational else 1.0
+    let kd = try component(entity.args, "B_SPLINE_SURFACE_WITH_KNOTS(") if complex else entity.args
+    let ko: usize = 0 if complex else 8
+    let ku = try knots(try arg(kd, ko), try arg(kd, ko + 2))
+    defer free(ku) in memory.heap
+    let kv = try knots(try arg(kd, ko + 1), try arg(kd, ko + 3))
+    defer free(kv) in memory.heap
+    return try boundary.value().add_spline_surface(points, weights, (i64)nu, (i64)nv, du, dv, ku, kv)

@@ -1,0 +1,55 @@
+## STEP presentation colors become CAD face data; no display/meshing policy here.
+import interop
+import strings
+from three import Vector3, invalid
+from cad import BrepModel
+from luce_step.document import Document, arg, inner, count_args, ref_id
+
+func color(data: Document, id: i64, depth: i64 = 0) -> Vector3?!:
+    if depth > 12:
+        error(invalid, "STEP presentation nesting limit exceeded")
+    let record = try data.get(id)
+    if record.kind == "COLOUR_RGB":
+        return Vector3(try strings.parse_f64(try arg(record.args, 1)), try strings.parse_f64(try arg(record.args, 2)), try strings.parse_f64(try arg(record.args, 3)))
+    if record.kind == "SURFACE_STYLE_USAGE" or record.kind == "FILL_AREA_STYLE_COLOUR":
+        return try color(data, try ref_id(try arg(record.args, 1)), depth + 1)
+    if record.kind == "SURFACE_STYLE_FILL_AREA":
+        return try color(data, try ref_id(try arg(record.args, 0)), depth + 1)
+    if record.kind == "PRESENTATION_STYLE_ASSIGNMENT" or record.kind == "SURFACE_SIDE_STYLE" or record.kind == "FILL_AREA_STYLE":
+        let members = try inner(try arg(record.args, 0 if record.kind == "PRESENTATION_STYLE_ASSIGNMENT" else 1))
+        for at in 0..<(try count_args(members)):
+            if let found = try color(data, try ref_id(try arg(members, at)), depth + 1):
+                return found
+    return none
+
+func assign(data: Document, boundary: interop.Reference[BrepModel], ids: const i64[], target: i64, tint: Vector3, depth: i64 = 0) -> !:
+    if depth > 12:
+        error(invalid, "STEP color target nesting limit exceeded")
+    let record = try data.get(target)
+    if record.kind == "ADVANCED_FACE" or record.kind == "FACE_SURFACE":
+        for at in 0..<ids.length:
+            if ids[at] == target:
+                try boundary.value().set_face_color((i64)at, tint)
+                return
+    elif record.kind == "MANIFOLD_SOLID_BREP":
+        try assign(data, boundary, ids, try ref_id(try arg(record.args, 1)), tint, depth + 1)
+    elif record.kind == "CLOSED_SHELL" or record.kind == "OPEN_SHELL" or record.kind == "ADVANCED_BREP_SHAPE_REPRESENTATION":
+        let members = try inner(try arg(record.args, 1))
+        for at in 0..<(try count_args(members)):
+            try assign(data, boundary, ids, try ref_id(try arg(members, at)), tint, depth + 1)
+
+pub func apply_colors(data: Document, boundary: interop.Reference[BrepModel], face_ids: const i64[]) -> !:
+    # Explicit face styles override inherited shell/solid colors.
+    for pass in 0..<2:
+        for record in data.records[..<data.count]:
+            if record.kind != "STYLED_ITEM":
+                continue
+            let target = try ref_id(try arg(record.args, 2))
+            let item = try data.get(target)
+            let face = item.kind == "ADVANCED_FACE" or item.kind == "FACE_SURFACE"
+            if face != (pass == 1):
+                continue
+            let styles = try inner(try arg(record.args, 1))
+            for at in 0..<(try count_args(styles)):
+                if let tint = try color(data, try ref_id(try arg(styles, at))):
+                    try assign(data, boundary, face_ids, target, tint)

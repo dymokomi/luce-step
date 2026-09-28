@@ -1,0 +1,72 @@
+## Unique-occurrence rigid STEP assemblies; repeated instances fail explicitly.
+import interop
+import strings
+from three import Matrix4, Vector3, invalid
+from cad import BrepModel
+from luce_step.document import Document, arg, inner, count_args, ref_id, component
+from luce_step.placements import placement
+
+func frame(data: Document, reference: str) -> Matrix4!:
+    let p = try placement(data, reference)
+    let z = try p.axis.normalized()
+    let x = try p.reference.subtract(z.multiply_scalar(p.reference.dot(z))).normalized()
+    return Matrix4(x, z.cross(x), z, p.origin)
+
+func inverse(m: Matrix4) -> Matrix4:
+    return Matrix4(Vector3(m.x.x, m.y.x, m.z.x), Vector3(m.x.y, m.y.y, m.z.y), Vector3(m.x.z, m.y.z, m.z.z), Vector3(-m.translation.dot(m.x), -m.translation.dot(m.y), -m.translation.dot(m.z)))
+
+func world(data: Document, representation: i64, depth: i64 = 0) -> Matrix4!:
+    if depth > 32:
+        error(invalid, "STEP assembly cycle or excessive depth")
+    var found = false
+    var result = Matrix4()
+    for record in data.records[..<data.count]:
+        if record.kind != "COMPLEX" or not strings.contains(record.args, "REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION("):
+            continue
+        let relation = try component(record.args, "REPRESENTATION_RELATIONSHIP(")
+        if (try ref_id(try arg(relation, 2))) != representation:
+            continue
+        if found:
+            error(invalid, "STEP repeated assembly occurrences require instanced CAD support")
+        found = true
+        let transformation = try data.get(try ref_id(try arg(try component(record.args, "REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION("), 0)))
+        if transformation.kind != "ITEM_DEFINED_TRANSFORMATION":
+            error(invalid, "unsupported STEP assembly transformation")
+        let source = try frame(data, try arg(transformation.args, 2))
+        let target = try frame(data, try arg(transformation.args, 3))
+        let parent = try world(data, try ref_id(try arg(relation, 3)), depth + 1)
+        result = parent.multiply(target.multiply(inverse(source)))
+    return result
+
+func assign(data: Document, boundary: interop.Reference[BrepModel], ids: const i64[], target: i64, matrix: Matrix4, depth: i64 = 0) -> !:
+    if depth > 16:
+        error(invalid, "STEP assembly shape nesting limit exceeded")
+    let record = try data.get(target)
+    if record.kind == "ADVANCED_FACE" or record.kind == "FACE_SURFACE":
+        for at in 0..<ids.length:
+            if ids[at] == target:
+                try boundary.value().set_face_placement((i64)at, matrix)
+                return
+    elif record.kind == "MANIFOLD_SOLID_BREP":
+        try assign(data, boundary, ids, try ref_id(try arg(record.args, 1)), matrix, depth + 1)
+    elif record.kind == "CLOSED_SHELL" or record.kind == "OPEN_SHELL" or record.kind == "ADVANCED_BREP_SHAPE_REPRESENTATION":
+        let members = try inner(try arg(record.args, 1))
+        for at in 0..<(try count_args(members)):
+            try assign(data, boundary, ids, try ref_id(try arg(members, at)), matrix, depth + 1)
+
+pub func apply_placements(data: Document, boundary: interop.Reference[BrepModel], face_ids: const i64[]) -> !:
+    # Some exporters relate the B-rep representation directly to its parent.
+    for record in data.records[..<data.count]:
+        if record.kind == "ADVANCED_BREP_SHAPE_REPRESENTATION":
+            try assign(data, boundary, face_ids, record.id, try world(data, record.id))
+    for record in data.records[..<data.count]:
+        if record.kind != "SHAPE_REPRESENTATION_RELATIONSHIP":
+            continue
+        let source = try ref_id(try arg(record.args, 2))
+        let target = try ref_id(try arg(record.args, 3))
+        let a = try data.get(source)
+        let b = try data.get(target)
+        if b.kind == "ADVANCED_BREP_SHAPE_REPRESENTATION":
+            try assign(data, boundary, face_ids, target, try world(data, source))
+        elif a.kind == "ADVANCED_BREP_SHAPE_REPRESENTATION":
+            try assign(data, boundary, face_ids, source, try world(data, target))

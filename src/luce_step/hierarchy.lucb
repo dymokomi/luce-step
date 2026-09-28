@@ -1,0 +1,96 @@
+## STEP product/occurrence and solid names become format-independent CAD paths.
+## Geometry placement stays in assemblies; this module only assigns identity.
+import interop
+import strings
+from three import invalid
+from cad import BrepModel
+from luce_step.document import Document, arg, inner, count_args, ref_id
+
+func name(builder: strings.Builder*, text: str) -> !:
+    if text.length >= 2 and text.bytes[0] == 39 and text.bytes[text.length - 1] == 39:
+        var at: usize = 1
+        while at + 1 < text.length:
+            let byte = text.bytes[at]
+            if byte == 47:
+                try builder.put("%2F")
+            elif byte == 37:
+                try builder.put("%25")
+            else:
+                discard(try builder.write(text.bytes[at..<at + 1]))
+            if byte == 39 and at + 2 < text.length and text.bytes[at + 1] == 39:
+                at += 1
+            at += 1
+
+func product_path(data: Document, product: i64, builder: strings.Builder*, depth: usize = 0) -> !:
+    if depth > 32:
+        error(invalid, "STEP product hierarchy contains a cycle")
+    var occurrence: str = ""
+    var parent: i64 = -1
+    for record in data.records[..<data.count]:
+        if record.kind == "NEXT_ASSEMBLY_USAGE_OCCURRENCE" and (try ref_id(try arg(record.args, 4))) == product:
+            if parent >= 0:
+                error(invalid, "STEP repeated product occurrences need instanced import")
+            parent = try ref_id(try arg(record.args, 3))
+            occurrence = try arg(record.args, 1)
+    if parent >= 0:
+        try product_path(data, parent, builder, depth + 1)
+        try builder.put("/")
+    if occurrence != "" and occurrence != "''" and occurrence != "$":
+        try name(builder, occurrence)
+        return
+    let definition = try data.get(product)
+    let formation = try data.get(try ref_id(try arg(definition.args, 2)))
+    let entry = try data.get(try ref_id(try arg(formation.args, 2)))
+    try name(builder, try arg(entry.args, 1))
+
+func representation_product(data: Document, representation: i64) -> i64!:
+    for record in data.records[..<data.count]:
+        if record.kind != "SHAPE_DEFINITION_REPRESENTATION" or (try ref_id(try arg(record.args, 1))) != representation:
+            continue
+        let shape = try data.get(try ref_id(try arg(record.args, 0)))
+        if shape.kind != "PRODUCT_DEFINITION_SHAPE": continue
+        let definition = try data.get(try ref_id(try arg(shape.args, 2)))
+        if definition.kind == "PRODUCT_DEFINITION": return definition.id
+    return -1
+
+func assign(data: Document, boundary: interop.Reference[BrepModel], ids: const i64[], entity: i64, path: str, depth: usize = 0) -> !:
+    if depth > 16: error(invalid, "STEP named shape nesting is too deep")
+    let record = try data.get(entity)
+    if record.kind == "ADVANCED_FACE":
+        for index in 0..<ids.length:
+            if ids[index] == entity:
+                try boundary.value().set_face_path((i64)index, path)
+                return
+    elif record.kind == "MANIFOLD_SOLID_BREP":
+        var full = try strings.Builder.create()
+        defer full.destroy()
+        try full.put(path)
+        if path.length > 0: try full.put("/")
+        let label = try arg(record.args, 0)
+        if label == "''" or label == "$":
+            var buffer: u8[64]
+            try full.put(try format(buffer, f"solid_{record.id}"))
+        else:
+            try name(&full, label)
+        try assign(data, boundary, ids, try ref_id(try arg(record.args, 1)), full.view(), depth + 1)
+    elif record.kind == "CLOSED_SHELL" or record.kind == "OPEN_SHELL" or record.kind == "ADVANCED_BREP_SHAPE_REPRESENTATION":
+        let members = try inner(try arg(record.args, 1))
+        for at in 0..<(try count_args(members)):
+            try assign(data, boundary, ids, try ref_id(try arg(members, at)), path, depth + 1)
+
+pub func apply_hierarchy(data: Document, boundary: interop.Reference[BrepModel], ids: const i64[]) -> !:
+    for representation in data.records[..<data.count]:
+        if representation.kind != "ADVANCED_BREP_SHAPE_REPRESENTATION": continue
+        var product = try representation_product(data, representation.id)
+        if product < 0:
+            for relation in data.records[..<data.count]:
+                if relation.kind != "SHAPE_REPRESENTATION_RELATIONSHIP": continue
+                let a = try ref_id(try arg(relation.args, 2))
+                let b = try ref_id(try arg(relation.args, 3))
+                if a == representation.id or b == representation.id:
+                    product = try representation_product(data, b if a == representation.id else a)
+                    if product >= 0: break
+        var path = try strings.Builder.create()
+        defer path.destroy()
+        if product >= 0: try product_path(data, product, &path)
+        try assign(data, boundary, ids, representation.id, path.view())

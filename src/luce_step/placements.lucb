@@ -1,0 +1,26 @@
+## STEP axis placements shared by geometry and assembly decoding.
+import strings
+from three import Vector3, invalid
+from luce_step.document import Document, arg, inner, ref_id
+
+pub struct Placement:
+    pub let origin: Vector3
+    pub let axis: Vector3
+    pub let reference: Vector3
+
+pub func direction(data: Document, text: str, fallback: Vector3) -> Vector3!:
+    if text == "$":
+        return fallback
+    let record = try data.get(try ref_id(text))
+    if record.kind != "DIRECTION":
+        error(invalid, "STEP expected a direction")
+    let values = try inner(try arg(record.args, 1))
+    return Vector3(try strings.parse_f64(try arg(values, 0)), try strings.parse_f64(try arg(values, 1)), try strings.parse_f64(try arg(values, 2)))
+
+pub func placement(data: Document, text: str) -> Placement!:
+    let record = try data.get(try ref_id(text))
+    if record.kind != "AXIS2_PLACEMENT_3D":
+        error(invalid, "STEP requires a 3D surface placement")
+    return Placement(try data.point(try ref_id(try arg(record.args, 1))),
+                     try direction(data, try arg(record.args, 2), Vector3(0.0, 0.0, 1.0)),
+                     try direction(data, try arg(record.args, 3), Vector3(1.0, 0.0, 0.0)))

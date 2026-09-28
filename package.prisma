@@ -1,0 +1,27 @@
+#prisma 4.0
+def package "luce-step" {
+    str owner = "dymokomi"
+    str version = "0.1.0"
+    str kind = "package"
+    str language = "luce-base"
+    str readme = "README.md"
+    str description = "Luce Base STEP Part 21 import with analytic B-rep surfaces, shared trims, colors and assembly groups."
+    def export "step" {
+        str module = "luce_step.step"
+    }
+    def dependency "luce-3d" {
+        str owner = "dymokomi"
+        str version = "^0.1.5"
+        str path = "../luce-3d"
+    }
+    def dependency "luce-cad" {
+        str owner = "dymokomi"
+        str version = "^0.1.0"
+        str path = "../luce-cad"
+    }
+    def dependency "luce-std" {
+        str owner = "dymokomi"
+        str version = "^0.1.0"
+        str path = "../luce-std"
+    }
+}

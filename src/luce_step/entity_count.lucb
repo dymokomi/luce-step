@@ -1,0 +1,27 @@
+## Preflight capacity without materializing token strings or reference lists.
+from three import invalid
+pub func entity_count(text: str) -> usize!:
+    var count: usize = 0
+    var at: usize = 0
+    while at < text.length:
+        if text.bytes[at] == 39:
+            at += 1
+            while at < text.length:
+                if text.bytes[at] == 39:
+                    at += 1
+                    if at == text.length or text.bytes[at] != 39: break
+                at += 1
+            continue
+        if at + 1 < text.length and text.bytes[at] == 47 and text.bytes[at + 1] == 42:
+            at += 2
+            while at + 1 < text.length and not (text.bytes[at] == 42 and text.bytes[at + 1] == 47): at += 1
+            at += 2
+            continue
+        if text.bytes[at] == 35:
+            at += 1
+            while at < text.length and text.bytes[at] >= 48 and text.bytes[at] <= 57: at += 1
+            while at < text.length and (text.bytes[at] == 32 or text.bytes[at] == 9 or text.bytes[at] == 10 or text.bytes[at] == 13): at += 1
+            if at < text.length and text.bytes[at] == 61: count += 1
+            if count > 2097152: error(invalid, "STEP exceeds 2M entity safety budget")
+        else: at += 1
+    return count

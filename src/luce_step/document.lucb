@@ -1,0 +1,215 @@
+import memory
+import strings
+from three import Vector3, invalid
+from luce_step.entity_count import entity_count
+
+pub struct Entity:
+    pub let id: i64
+    pub let kind: str
+    pub let args: str
+
+pub struct Document:
+    pub let records: Entity[]
+    pub let slots: i64[]
+    pub var count: usize
+    pub func init(text: str) -> !:
+        if text.length > 268435456 or not strings.starts_with(trim(text), "ISO-10303-21;") or not strings.contains(text, "END-ISO-10303-21;"):
+            error(invalid, "expected STEP Part 21 header")
+        let capacity = try entity_count(text)
+        let records = try alloc Entity[capacity] in memory.heap
+        errdefer free(records) in memory.heap
+        let slots = try alloc i64[capacity * 2 + 1] in memory.heap
+        errdefer free(slots) in memory.heap
+        for index in 0..<slots.length:
+            slots[index] = -1
+        self.records = records
+        self.slots = slots
+        self.count = 0
+        var at: usize = 0
+        while at < text.length:
+            if text.bytes[at] == 39:
+                at = try skip_string(text, at)
+                continue
+            if at + 1 < text.length and text.bytes[at] == 47 and text.bytes[at + 1] == 42:
+                at += 2
+                while at + 1 < text.length and not (text.bytes[at] == 42 and text.bytes[at + 1] == 47):
+                    at += 1
+                at += 2
+                continue
+            if text.bytes[at] != 35:
+                at += 1
+                continue
+            let start = at
+            while at < text.length and text.bytes[at] != 61:
+                at += 1
+            if at == text.length:
+                error(invalid, "unterminated STEP entity")
+            let id = try ref_id(trim((str)text.bytes[start..<at]))
+            at += 1
+            let body = at
+            while at < text.length and text.bytes[at] != 59:
+                if text.bytes[at] == 39:
+                    at = try skip_string(text, at)
+                else:
+                    at += 1
+            if at == text.length:
+                error(invalid, "STEP entity is missing its terminator")
+            if self.count == records.length:
+                error(invalid, "STEP entity preflight mismatch")
+            let record = trim((str)text.bytes[body..<at])
+            var split: usize = 0
+            while split < record.length and record.bytes[split] != 40:
+                split += 1
+            if split == record.length:
+                error(invalid, "STEP entity has no argument list")
+            var slot = (usize)id % self.slots.length
+            while self.slots[slot] >= 0:
+                if self.records[(usize)self.slots[slot]].id == id:
+                    error(invalid, "duplicate STEP entity ID")
+                slot = (slot + 1) % self.slots.length
+            self.slots[slot] = (i64)self.count
+            self.records[self.count] = Entity(id, "COMPLEX" if split == 0 else trim((str)record.bytes[..<split]), try inner((str)record.bytes[split..]))
+            self.count += 1
+            at += 1
+    pub func get(id: i64) -> Entity!:
+        var slot = (usize)id % self.slots.length
+        while self.slots[slot] >= 0:
+            let record = self.records[(usize)self.slots[slot]]
+            if record.id == id:
+                return record
+            slot = (slot + 1) % self.slots.length
+        error(invalid, "STEP reference has no definition")
+    pub func point(id: i64) -> Vector3!:
+        let entity = try self.get(id)
+        if entity.kind != "CARTESIAN_POINT":
+            error(invalid, "STEP reference is not a Cartesian point")
+        let values = try inner(try arg(entity.args, 1))
+        return Vector3(try strings.parse_f64(try arg(values, 0)), try strings.parse_f64(try arg(values, 1)), try strings.parse_f64(try arg(values, 2)))
+    pub mutating func close():
+        free(self.records) in memory.heap
+        free(self.slots) in memory.heap
+
+pub func component(text: str, name: str) -> str!:
+    var found = strings.find(text, name) else error(invalid, "STEP complex surface component missing")
+    while found > 0 and ((text.bytes[found - 1] >= 65 and text.bytes[found - 1] <= 90) or text.bytes[found - 1] == 95):
+        found = strings.find_from(text, name, found + 1) else error(invalid, "STEP complex surface component missing")
+    let start = found + name.length
+    var at = start
+    var depth: usize = 1
+    while at < text.length:
+        if text.bytes[at] == 39:
+            at = try skip_string(text, at)
+            continue
+        if text.bytes[at] == 40:
+            depth += 1
+        elif text.bytes[at] == 41:
+            depth -= 1
+            if depth == 0:
+                return (str)text.bytes[start..<at]
+        at += 1
+    error(invalid, "unbalanced STEP complex component")
+
+pub func trim(text: str) -> str:
+    var a: usize = 0
+    var b = text.length
+    while a < b and text.bytes[a] <= 32:
+        a += 1
+    while b > a and text.bytes[b - 1] <= 32:
+        b -= 1
+    return (str)text.bytes[a..<b]
+
+pub func skip_string(text: str, start: usize) -> usize!:
+    var at = start + 1
+    while at < text.length:
+        if text.bytes[at] == 39:
+            if at + 1 < text.length and text.bytes[at + 1] == 39:
+                at += 2
+                continue
+            return at + 1
+        at += 1
+    error(invalid, "unterminated STEP string")
+
+pub func inner(text: str) -> str!:
+    let value = trim(text)
+    if value.length < 2 or value.bytes[0] != 40 or value.bytes[value.length - 1] != 41:
+        error(invalid, "expected STEP list")
+    return (str)value.bytes[1..<value.length - 1]
+
+pub func arg(text: str, wanted: usize) -> str!:
+    var start: usize = 0
+    var at: usize = 0
+    var index: usize = 0
+    var depth: i64 = 0
+    while at <= text.length:
+        if at == text.length or (text.bytes[at] == 44 and depth == 0):
+            if index == wanted:
+                return trim((str)text.bytes[start..<at])
+            index += 1
+            start = at + 1
+        elif text.bytes[at] == 39:
+            at = try skip_string(text, at)
+            continue
+        elif text.bytes[at] == 40:
+            depth += 1
+        elif text.bytes[at] == 41:
+            depth -= 1
+            if depth < 0:
+                error(invalid, "unbalanced STEP list")
+        at += 1
+    error(invalid, "missing STEP argument")
+
+pub func count_args(text: str) -> usize!:
+    if trim(text) == "":
+        return 0
+    var count: usize = 1
+    var depth: i64 = 0
+    var at: usize = 0
+    while at < text.length:
+        let c = text.bytes[at]
+        if c == 39:
+            at = try skip_string(text, at)
+            continue
+        if c == 40:
+            depth += 1
+        elif c == 41:
+            depth -= 1
+        elif c == 44 and depth == 0:
+            count += 1
+        at += 1
+    if depth != 0:
+        error(invalid, "unbalanced STEP list")
+    return count
+
+pub func ref_id(text: str) -> i64!:
+    if text.length < 2 or text.bytes[0] != 35:
+        error(invalid, "expected STEP reference")
+    let id = try integer((str)text.bytes[1..])
+    if id <= 0:
+        error(invalid, "STEP IDs must be positive")
+    return id
+
+pub func integer(text: str) -> i64!:
+    return strings.parse_i64(text) else error(invalid, "expected STEP integer")
+
+pub func knots(multiplicities: str, values: str) -> f64[]!:
+    let mult = try inner(multiplicities)
+    let knot_values = try inner(values)
+    let length = try count_args(mult)
+    if length != (try count_args(knot_values)):
+        error(invalid, "STEP knot/multiplicity mismatch")
+    var total: usize = 0
+    for index in 0..<length:
+        let count = try integer(try arg(mult, index))
+        if count < 1 or count > 9 or total + (usize)count > 4105:
+            error(invalid, "invalid STEP knot multiplicity")
+        total += (usize)count
+    let result = try alloc f64[total] in memory.heap
+    errdefer free(result) in memory.heap
+    var at: usize = 0
+    for index in 0..<length:
+        let count = try integer(try arg(mult, index))
+        let value = try strings.parse_f64(try arg(knot_values, index))
+        for item in 0..<count:
+            result[at] = value
+            at += 1
+    return result

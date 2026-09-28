@@ -1,0 +1,131 @@
+## STEP Part 21 geometry subset. Unsupported topology is rejected, not dropped.
+import files
+import interop
+import memory
+import strings
+from three import PolygonMesh, Vector3, invalid
+from cad import CadModel, cad_model_type
+from luce_step.document import Document, arg, inner, count_args, ref_id, integer, knots, component
+from luce_step.brep_reader import read_brep
+
+pub struct Step:
+    let reserved: u8 = 0
+    ## Read Part 21 geometry in source coordinates, without unit conversion.
+    pub static func load(path: str, segments: i64 = 16) -> interop.Reference[PolygonMesh]!:
+        let text = try files.read_text(path, 268435456)
+        defer text.release()
+        return try Step.decode(text.value, segments)
+
+    ## Decode planar faces or surface-only untrimmed rational B-spline patches.
+    pub static func decode(text: str, segments: i64 = 16) -> interop.Reference[PolygonMesh]!:
+        let model = try Step.decode_model(text)
+        defer model.release()
+        return try model.value().tessellate(segments)
+
+    ## Read an analytic CAD model without tessellating it.
+    pub static func load_model(path: str) -> interop.Reference[CadModel]!:
+        let text = try files.read_text(path, 268435456)
+        defer text.release()
+        return try Step.decode_model(text.value)
+
+    ## Map STEP entities into format-independent CAD faces and control nets.
+    pub static func decode_model(text: str) -> interop.Reference[CadModel]!:
+        var data = try Document(text)
+        defer data.close()
+        let model = try interop.Reference[CadModel].adopt(new CadModel() in memory.heap, cad_model_type, memory.heap)
+        errdefer model.release()
+        for entity in data.records[..<data.count]:
+            if entity.kind == "ADVANCED_FACE":
+                try read_brep(data, model)
+                return model
+        var faces: usize = 0
+        for entity in data.records[..<data.count]:
+            if entity.kind == "MAPPED_ITEM" or entity.kind == "REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION":
+                error(invalid, "STEP assembly placements are not supported yet")
+            if entity.kind != "FACE" and entity.kind != "FACE_SURFACE" and entity.kind != "ADVANCED_FACE":
+                continue
+            if entity.kind != "FACE":
+                let surface = try data.get(try ref_id(try arg(entity.args, 2)))
+                if surface.kind != "PLANE":
+                    error(invalid, "STEP trimmed curved faces require trim-aware CAD tessellation; unsupported")
+            let bounds = try inner(try arg(entity.args, 1))
+            if (try count_args(bounds)) != 1:
+                error(invalid, "STEP face holes require constrained triangulation; unsupported")
+            let bound = try data.get(try ref_id(try arg(bounds, 0)))
+            if bound.kind != "FACE_OUTER_BOUND" and bound.kind != "FACE_BOUND":
+                error(invalid, "invalid STEP face bound")
+            let loop = try data.get(try ref_id(try arg(bound.args, 1)))
+            let vertices = try inner(try arg(loop.args, 1))
+            let count = try count_args(vertices)
+            if count < 3 or count > 256:
+                error(invalid, "STEP face must have 3..256 corners")
+            let boundary = try alloc Vector3[count] in memory.heap
+            defer free(boundary) in memory.heap
+            var reverse = (try arg(bound.args, 2)) == ".F."
+            if entity.kind != "FACE" and (try arg(entity.args, 3)) == ".F.":
+                reverse = not reverse
+            for index in 0..<count:
+                var point_id = try ref_id(try arg(vertices, index))
+                if loop.kind == "EDGE_LOOP":
+                    let oriented = try data.get(point_id)
+                    if oriented.kind != "ORIENTED_EDGE":
+                        error(invalid, "invalid STEP oriented edge")
+                    let edge = try data.get(try ref_id(try arg(oriented.args, 3)))
+                    let curve = try data.get(try ref_id(try arg(edge.args, 3)))
+                    if edge.kind != "EDGE_CURVE" or curve.kind != "LINE":
+                        error(invalid, "STEP curved boundary edges are not supported yet")
+                    let vertex = try data.get(try ref_id(try arg(edge.args, 1 if (try arg(oriented.args, 4)) == ".T." else 2)))
+                    if vertex.kind != "VERTEX_POINT":
+                        error(invalid, "invalid STEP vertex")
+                    point_id = try ref_id(try arg(vertex.args, 1))
+                elif loop.kind != "POLY_LOOP":
+                    error(invalid, "unsupported STEP boundary loop")
+                boundary[count - 1 - index if reverse else index] = try data.point(point_id)
+            try model.value().add_planar(boundary[..<count])
+            faces += 1
+        if faces > 0:
+            return model
+        # Surface-only datasets, including complex rational B-spline entities.
+        for entity in data.records[..<data.count]:
+            let complex = entity.kind == "COMPLEX" and strings.contains(entity.args, "B_SPLINE_SURFACE(")
+            if entity.kind != "B_SPLINE_SURFACE_WITH_KNOTS" and not complex:
+                continue
+            let spline = try component(entity.args, "B_SPLINE_SURFACE(") if complex else entity.args
+            let offset: usize = 0 if complex else 1
+            let du = try integer(try arg(spline, offset))
+            let dv = try integer(try arg(spline, offset + 1))
+            let rows = try inner(try arg(spline, offset + 2))
+            let rational = complex and strings.contains(entity.args, "RATIONAL_B_SPLINE_SURFACE(")
+            let weight_rows = try inner(try arg(try component(entity.args, "RATIONAL_B_SPLINE_SURFACE("), 0)) if rational else ""
+            let nu = try count_args(rows)
+            let nv = try count_args(try inner(try arg(rows, 0)))
+            if nu < 2 or nu > 1024 or nv < 2 or nv > 1024 or nu * nv > 262144:
+                error(invalid, "STEP B-spline control net exceeds limits")
+            let points = try alloc Vector3[nu * nv] in memory.heap
+            defer free(points) in memory.heap
+            let weights = try alloc f64[nu * nv] in memory.heap
+            defer free(weights) in memory.heap
+            for u in 0..<nu:
+                let row = try inner(try arg(rows, u))
+                if (try count_args(row)) != nv:
+                    error(invalid, "STEP control net is not rectangular")
+                for v in 0..<nv:
+                    points[u * nv + v] = try data.point(try ref_id(try arg(row, v)))
+                    weights[u * nv + v] = 1.0
+                    if rational:
+                        let weight_row = try inner(try arg(weight_rows, u))
+                        if (try count_args(weight_row)) != nv:
+                            error(invalid, "STEP rational weight net is not rectangular")
+                        weights[u * nv + v] = try strings.parse_f64(try arg(weight_row, v))
+            if rational and (try count_args(weight_rows)) != nu:
+                error(invalid, "STEP rational weight row count is invalid")
+            let knot_data = try component(entity.args, "B_SPLINE_SURFACE_WITH_KNOTS(") if complex else entity.args
+            let knot_offset: usize = 0 if complex else 8
+            let ku = try knots(try arg(knot_data, knot_offset), try arg(knot_data, knot_offset + 2))
+            defer free(ku) in memory.heap
+            let kv = try knots(try arg(knot_data, knot_offset + 1), try arg(knot_data, knot_offset + 3))
+            defer free(kv) in memory.heap
+            try model.value().add_nurbs(points, weights, (i64)nu, (i64)nv, du, dv, ku, kv)
+        if model.value().face_count() == 0:
+            error(invalid, "STEP has no supported faces or untrimmed B-spline surfaces")
+        return model
