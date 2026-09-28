@@ -3,6 +3,7 @@ import files
 import interop
 import memory
 import strings
+import math
 from three import PolygonMesh, Vector3, invalid
 from cad import CadModel, cad_model_type
 from luce_step.document import Document, arg, inner, count_args, ref_id, integer, knots, component
@@ -11,32 +12,36 @@ from luce_step.brep_reader import read_brep
 pub struct Step:
     let reserved: u8 = 0
     ## Read Part 21 geometry in source coordinates, without unit conversion.
-    pub static func load(path: str, segments: i64 = 16) -> interop.Reference[PolygonMesh]!:
+    pub static func load(path: str, segments: i64 = 16, tolerance: f64 = 0.0) -> interop.Reference[PolygonMesh]!:
         let text = try files.read_text(path, 268435456)
         defer text.release()
-        return try Step.decode(text.value, segments)
+        return try Step.decode(text.value, segments, tolerance)
 
     ## Decode planar faces or surface-only untrimmed rational B-spline patches.
-    pub static func decode(text: str, segments: i64 = 16) -> interop.Reference[PolygonMesh]!:
-        let model = try Step.decode_model(text)
+    pub static func decode(text: str, segments: i64 = 16, tolerance: f64 = 0.0) -> interop.Reference[PolygonMesh]!:
+        let model = try Step.decode_model(text, tolerance)
         defer model.release()
         return try model.value().tessellate(segments)
 
-    ## Read an analytic CAD model without tessellating it.
-    pub static func load_model(path: str) -> interop.Reference[CadModel]!:
+    ## Read analytic CAD. Zero tolerance uses STEP uncertainty; a positive
+    ## override (1e-9..1 in source units) belongs to this import, not a global.
+    pub static func load_model(path: str, tolerance: f64 = 0.0) -> interop.Reference[CadModel]!:
         let text = try files.read_text(path, 268435456)
         defer text.release()
-        return try Step.decode_model(text.value)
+        return try Step.decode_model(text.value, tolerance)
 
-    ## Map STEP entities into format-independent CAD faces and control nets.
-    pub static func decode_model(text: str) -> interop.Reference[CadModel]!:
+    ## Map STEP entities into CAD, retaining the chosen tolerance for preview
+    ## and subsequent tessellation. Zero keeps the source-declared uncertainty.
+    pub static func decode_model(text: str, tolerance: f64 = 0.0) -> interop.Reference[CadModel]!:
+        if not math.is_finite(tolerance) or (tolerance != 0.0 and (tolerance < 1e-9 or tolerance > 1.0)):
+            error(invalid,"STEP import tolerance must be 0 (file) or 1e-9..1 source unit")
         var data = try Document(text)
         defer data.close()
         let model = try interop.Reference[CadModel].adopt(new CadModel() in memory.heap, cad_model_type, memory.heap)
         errdefer model.release()
         for entity in data.records[..<data.count]:
             if entity.kind == "ADVANCED_FACE":
-                try read_brep(data, model)
+                try read_brep(data, model, tolerance)
                 return model
         var faces: usize = 0
         for entity in data.records[..<data.count]:
