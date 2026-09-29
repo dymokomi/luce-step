@@ -2,7 +2,7 @@
 
 Original **Luce Base** STEP Part 21 geometry reader. Public export:
 `step.Step.load_model(path)` and `Step.decode_model(text)` return an analytic
-`cad.CadModel`; call its `tessellate(segments)` for a `geocore.PolygonMesh`.
+`cad.CadModel`; call its `tessellate(segments)` for a `geocore.geocore Mesh`.
 File entity/reference decoding lives here; model validation, surface ownership,
 trim semantics and surface sampling belong to `luce-cad`.
 

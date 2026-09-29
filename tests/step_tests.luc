@@ -34,7 +34,8 @@ pub func step_tests() -> unit!:
     for corner in 0..<colored.vertex_count():
         near(colored.vertex(corner).normal.length(), 1.0)
     let edited = colored.moved_points([0], Vector3(0.1, 0.0, 0.0))
-    assert(edited.find_attribute("N", 1) == -1 and edited.find_attribute("Cd", 2) >= 0)
+    # A Move keeps the authored normals, refreshed around the moved point.
+    assert(edited.find_attribute("N", 1) >= 0 and edited.find_attribute("Cd", 2) >= 0)
     for face in 0..<colored.face_count():
         let cap = colored.attribute_value(parent, face, 0) == 2.0
         near(colored.attribute_value(cd, face, 0), 0.929412 if cap else 0.172549)
