@@ -1,6 +1,6 @@
 ## STEP axis placements shared by geometry and assembly decoding.
 import strings
-from three import Vector3, invalid
+from geocore import Vector3, invalid
 from luce_step.document import Document, arg, inner, ref_id
 
 pub struct Placement:

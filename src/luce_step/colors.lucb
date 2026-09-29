@@ -1,7 +1,7 @@
 ## STEP presentation colors become CAD face data; no display/meshing policy here.
 import interop
 import strings
-from three import Vector3, invalid
+from geocore import Vector3, invalid
 from cad import BrepModel
 from luce_step.document import Document, arg, inner, count_args, ref_id
 

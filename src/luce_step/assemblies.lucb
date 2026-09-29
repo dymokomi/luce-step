@@ -1,7 +1,7 @@
 ## Unique-occurrence rigid STEP assemblies; repeated instances fail explicitly.
 import interop
 import strings
-from three import Matrix4, Vector3, invalid
+from geocore import Matrix4, Vector3, invalid
 from cad import BrepModel
 from luce_step.document import Document, arg, inner, count_args, ref_id, component
 from luce_step.placements import placement

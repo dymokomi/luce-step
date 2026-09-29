@@ -2,7 +2,7 @@
 ## surface-only rational B-splines and import tolerance.
 import files
 from step import Step
-from three import Vector3
+from geocore import Vector3
 from checks import near, manifold
 
 pub func step_tests() -> unit!:

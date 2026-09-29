@@ -2,7 +2,7 @@
 
 Original **Luce Base** STEP Part 21 geometry reader. Public export:
 `step.Step.load_model(path)` and `Step.decode_model(text)` return an analytic
-`cad.CadModel`; call its `tessellate(segments)` for a `three.PolygonMesh`.
+`cad.CadModel`; call its `tessellate(segments)` for a `geocore.PolygonMesh`.
 File entity/reference decoding lives here; model validation, surface ownership,
 trim semantics and surface sampling belong to `luce-cad`.
 
@@ -44,7 +44,7 @@ uses a separate Transform node for scale. Shared STEP edges tessellate once.
 The Part 21 scanner handles strings, references, simple and complex entities;
 it is not a general EXPRESS schema validator. References use a bounded hash table.
 Limits: 256 MiB input, 2,097,152 entities, 8,192 B-rep faces, 32,768 shared
-vertices/edges, 64 trim loops, and the separate luce-3d polygon-mesh budgets.
+vertices/edges, 64 trim loops, and the separate luce-geocore polygon-mesh budgets.
 Curves may have 256 controls; NURBS surfaces are bounded to 1,024 per direction
 and 262,144 controls total. Entity allocation follows a counted preflight;
 topology references use hashed lookup. Spline trim endpoints must still agree

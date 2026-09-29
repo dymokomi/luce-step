@@ -1,6 +1,6 @@
 import memory
 import strings
-from three import Vector3, invalid
+from geocore import Vector3, invalid
 from luce_step.entity_count import entity_count
 
 pub struct Entity:

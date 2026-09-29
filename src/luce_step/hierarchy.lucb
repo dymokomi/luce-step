@@ -2,7 +2,7 @@
 ## Geometry placement stays in assemblies; this module only assigns identity.
 import interop
 import strings
-from three import invalid
+from geocore import invalid
 from cad import BrepModel
 from luce_step.document import Document, arg, inner, count_args, ref_id
 

@@ -3,7 +3,7 @@ import interop
 import ownership
 import memory
 import strings
-from three import Vector3, invalid
+from geocore import Vector3, invalid
 from cad import CadModel, BrepModel, brep_model_type
 from luce_step.document import Document, Entity, arg, inner, count_args, ref_id, integer, knots, component
 from luce_step.colors import apply_colors
