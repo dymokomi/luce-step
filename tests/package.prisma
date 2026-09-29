@@ -1,0 +1,22 @@
+#prisma 4.0
+def package "luce_step_tests" {
+    str source = "."
+    def dependency "luce-step" {
+        str path = ".."
+    }
+    def dependency "luce-cad" {
+        str owner = "dymokomi"
+        str version = "^0.2.0"
+        str path = "../../luce-cad"
+    }
+    def dependency "luce-3d" {
+        str owner = "dymokomi"
+        str version = "^0.2.0"
+        str path = "../../luce-3d"
+    }
+    def dependency "luce-std" {
+        str owner = "dymokomi"
+        str version = "^0.1.0"
+        str path = "../../luce-std"
+    }
+}

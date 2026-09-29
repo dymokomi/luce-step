@@ -1,14 +1,12 @@
 # luce-step
 
 Original **Luce Base** STEP Part 21 geometry reader. Public export:
-`step.Step.load(path, segments=16)` and `Step.decode(text, segments=16)`.
-These convenience APIs return `three.PolygonMesh` by tessellating a CAD model.
-`Step.load_model(path)` and `Step.decode_model(text)` instead return an analytic
-`cad.CadModel`. File entity/reference decoding lives here; model validation,
-surface ownership and trim semantics belong to `luce-cad`; numerical surface
-sampling belongs to `luce-tesselator`.
+`step.Step.load_model(path)` and `Step.decode_model(text)` return an analytic
+`cad.CadModel`; call its `tessellate(segments)` for a `three.PolygonMesh`.
+File entity/reference decoding lives here; model validation, surface ownership,
+trim semantics and surface sampling belong to `luce-cad`.
 
-All four APIs accept an optional `tolerance` argument. `0` (default) uses the
+Both APIs accept an optional `tolerance` argument. `0` (default) uses the
 file's declared length uncertainty, with the existing `1e-6` fallback. A positive
 value from `1e-9` through `1` explicitly replaces it, in **source coordinate
 units**. The chosen value is retained by the CAD model for edge agreement and
@@ -53,6 +51,9 @@ topology references use hashed lookup. Spline trim endpoints must still agree
 within the chosen import tolerance; automatic tolerance healing is not enabled.
 Uniform surface sampling is not a tolerance-controlled CAD tessellator.
 
-Tests run through sibling `luced-3d/tests/run.py`. The external-file probe
+`./test.sh` runs the Luce regressions in `tests/` (faceted and rational
+surfaces, B-rep cylinder, assembly placements, colors, reflected transforms and
+import tolerance) native and through the C backend; CI pins the compilers and
+sibling packages in `bootstrap/PACKAGES`. The external-file probe
 `luced-3d/tools/cad_probe.py` tests a real STEP against a reference OBJ without
 using that OBJ to generate geometry. See `luced-3d/docs/CAD_TESSELLATION.md`.
