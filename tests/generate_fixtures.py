@@ -4,12 +4,11 @@ scratch copy of tests/fixtures):
 - star_face.step: one faceted FACE whose POLY_LOOP has 1000 corners, a star
   (radii 1 and 0.8 alternating, so every other corner is concave).
 - star_prism.step: a closed B-rep prism over a 1000-corner star: two planar
-  caps of 1000 edge uses each (luce-cad's B-rep faces take up to 1024) and
+  caps of 1000 edge uses each and
   1000 planar sides, all LINE edges.
-- limits.step: four planar faces, three past a budget and skipped with a
-  warning: 65 loops (a plate with 64 holes), 1100 edge uses (a star), and a
-  loop through a 300-control-point spline edge; the fourth, a square, stays.
-- all_over.step: only the 65-loop plate, so every face is skipped.
+- big_faces.step: three planar B-rep faces past luce-cad's old per-face
+  budgets: a plate with 500 square holes (501 loops), a star of 5000 edge
+  uses, and a loop through a 2000-control-point spline edge.
 """
 import math
 
@@ -156,28 +155,15 @@ def square(x, y, size, clockwise=False):
     return corners[::-1] if clockwise else corners
 
 
-def plate(faces):
-    # 64 holes: 65 loops.
-    faces.face([faces.polygon(square(0.0, 0.0, 10.0))] + [faces.polygon(square(1.0 + 1.1 * i, 1.0 + 1.1 * j, 0.5, True), False) for i in range(8) for j in range(8)])
-
-
-def limits():
+def big_faces():
     faces = Faces()
-    plate(faces)
-    faces.face([faces.polygon([(20.0 + x, y) for x, y in star(1100)])])
-    faces.face([faces.loop([faces.spline((30.0, 0.0), (32.0, 0.0), 300), faces.line((32.0, 0.0), (31.0, 1.0)), faces.line((31.0, 1.0), (30.0, 0.0))], True)])
-    faces.face([faces.polygon(square(40.0, 0.0, 1.0))])
-    return faces.text()
-
-
-def all_over():
-    faces = Faces()
-    plate(faces)
+    faces.face([faces.polygon(square(0.0, 0.0, 30.0))] + [faces.polygon(square(1.0 + 1.15 * i, 1.0 + 1.15 * j, 0.5, True), False) for i in range(25) for j in range(20)])
+    faces.face([faces.polygon([(40.0 + x, y) for x, y in star(5000)])])
+    faces.face([faces.loop([faces.spline((50.0, 0.0), (52.0, 0.0), 2000), faces.line((52.0, 0.0), (51.0, 1.0)), faces.line((51.0, 1.0), (50.0, 0.0))], True)])
     return faces.text()
 
 
 def write_fixtures(directory):
     (directory / "star_face.step").write_text(star_face())
     (directory / "star_prism.step").write_text(star_prism())
-    (directory / "limits.step").write_text(limits())
-    (directory / "all_over.step").write_text(all_over())
+    (directory / "big_faces.step").write_text(big_faces())

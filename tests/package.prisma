@@ -6,7 +6,7 @@ def package "luce_step_tests" {
     }
     def dependency "luce-cad" {
         str owner = "dymokomi"
-        str version = "^0.4.2"
+        str version = "^0.4.3"
         str path = "../../luce-cad"
     }
     def dependency "luce-geocore" {

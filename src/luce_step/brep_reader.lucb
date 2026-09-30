@@ -41,19 +41,9 @@ struct IdMap:
         free(self.values) in memory.heap
 
 
-## Budgets a face or edge must fit, else it is skipped with a warning:
-## luce-cad's B-rep faces take at most 64 loops and 1024 edge uses, and
-## spline edges here at most 256 control points.
-let most_face_loops: usize = 64
-let most_face_uses: usize = 1024
-let most_spline_controls: usize = 256
-
-## A line of `warnings`.
-func note(warnings: Growing[u8]*, text: str) -> !:
-    for byte in text.bytes: try warnings.push(byte)
-    try warnings.push(10)
-
-pub func read_brep(data: Document, model: interop.Reference[CadModel], tolerance_override: f64 = 0.0, warnings: Growing[u8]*) -> !:
+## B-rep faces of any number of loops and edge uses, and spline edges of
+## any number of control points.
+pub func read_brep(data: Document, model: interop.Reference[CadModel], tolerance_override: f64 = 0.0) -> !:
     var tolerance: f64 = 0.000001
     var declared = false
     for entity in data.records[..<data.count]:
@@ -78,6 +68,11 @@ pub func read_brep(data: Document, model: interop.Reference[CadModel], tolerance
     defer surfaces.close()
     var face_ids = Growing[i64]()
     defer face_ids.close()
+    # One face's signed edge uses and loop sizes.
+    var uses = Growing[i64]()
+    defer uses.close()
+    var sizes = Growing[i64]()
+    defer sizes.close()
     for entity in data.records[..<data.count]:
         if entity.kind == "MAPPED_ITEM" or entity.kind == "REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION":
             error(invalid, "STEP assembly placements are not supported yet")
@@ -109,12 +104,7 @@ pub func read_brep(data: Document, model: interop.Reference[CadModel], tolerance
             let controls = try inner(try arg(spline, offset + 1))
             let count = try count_args(controls)
             if count < 2:
-                error(invalid, "STEP spline edge control point limit exceeded")
-            if count > most_spline_controls:
-                var line: u8[256] = ---
-                try note(warnings, try format(line, f"Skipped STEP edge #{entity.id}: {count} control points exceed the limit of 256; faces using it are skipped"))
-                try edges.put(entity.id, -1)
-                continue
+                error(invalid, "STEP spline edge needs two control points")
             let points = try alloc Vector3[count] in memory.heap
             defer free(points) in memory.heap
             let weights = try alloc f64[count] in memory.heap
@@ -145,7 +135,6 @@ pub func read_brep(data: Document, model: interop.Reference[CadModel], tolerance
         let count = try count_args(bounds)
         if count == 0:
             error(invalid, "STEP face boundary limit exceeded")
-        if try over_budget(data, entity.id, bounds, count, &edges, warnings): continue
         let surface = try data.get(try ref_id(try arg(entity.args, 2)))
         # A surface can be shared by several trimmed faces.
         var surface_index: i64 = -1
@@ -154,10 +143,8 @@ pub func read_brep(data: Document, model: interop.Reference[CadModel], tolerance
         if surface_index < 0:
             surface_index = try read_surface(data, surface, boundary)
             try surfaces.put(surface.id, surface_index)
-        var uses: i64[1024]
-        var sizes: i64[64]
-        var total: usize = 0
-        var loops: usize = 0
+        uses.clear()
+        sizes.clear()
         # FACE_OUTER_BOUND is not required to occur first in a STEP SET.
         for pass in 0..<2:
             for at in 0..<count:
@@ -167,17 +154,19 @@ pub func read_brep(data: Document, model: interop.Reference[CadModel], tolerance
                     error(invalid, "invalid STEP face boundary")
                 if outer != (pass == 0):
                     continue
-                if outer and loops != 0:
+                if outer and sizes.count != 0:
                     error(invalid, "multiple STEP outer boundaries")
-                if not outer and loops == 0:
+                if not outer and sizes.count == 0:
                     error(invalid, "STEP face has no explicit outer boundary")
                 let loop = try data.get(try ref_id(try arg(bound.args, 1)))
                 if loop.kind != "EDGE_LOOP":
                     error(invalid, "STEP advanced face requires edge loops")
                 let members = try inner(try arg(loop.args, 1))
                 let length = try count_args(members)
-                if length == 0 or total + length > uses.length:
-                    error(invalid, "STEP edge use limit exceeded")
+                if length == 0:
+                    error(invalid, "STEP edge loop has no edges")
+                let total = uses.count
+                try uses.extend(total + length, 0)
                 let forward = (try arg(bound.args, 2)) == ".T."
                 for item in 0..<length:
                     let oriented = try data.get(try ref_id(try arg(members, item)))
@@ -185,49 +174,14 @@ pub func read_brep(data: Document, model: interop.Reference[CadModel], tolerance
                         error(invalid, "invalid STEP oriented edge")
                     let edge = (try edges.get(try ref_id(try arg(oriented.args, 3)))) + 1
                     let positive = ((try arg(oriented.args, 4)) == ".T.") == forward
-                    uses[total + (item if forward else length - 1 - item)] = edge if positive else -edge
-                sizes[loops] = (i64)length
-                loops += 1
-                total += length
-        discard(try boundary.value().add_face(surface_index, uses[..<total], sizes[..<loops], (try arg(entity.args, 3)) == ".T."))
+                    uses.items[total + (item if forward else length - 1 - item)] = edge if positive else -edge
+                try sizes.push((i64)length)
+        discard(try boundary.value().add_face(surface_index, uses.view(), sizes.view(), (try arg(entity.args, 3)) == ".T."))
         try face_ids.push(entity.id)
     try apply_colors(data, boundary, face_ids.view())
     try apply_placements(data, boundary, face_ids.view())
     try apply_hierarchy(data, boundary, face_ids.view())
-    if face_ids.count == 0 and warnings.count > 0:
-        error(invalid, "every STEP face was skipped: it exceeds a limit or uses a skipped edge")
     try model.value().attach_brep(boundary)
-
-## Whether face `id` exceeds a budget (too many loops or edge uses) or uses
-## a skipped edge; if so a warning names it. Loops that are not edge loops
-## are left to the reader, which reports them.
-func over_budget(data: Document, id: i64, bounds: str, count: usize, edges: IdMap*, warnings: Growing[u8]*) -> bool!:
-    var line: u8[256] = ---
-    if count > most_face_loops:
-        try note(warnings, try format(line, f"Skipped STEP face #{id}: {count} trim loops exceed the limit of 64"))
-        return true
-    var total: usize = 0
-    for at in 0..<count:
-        let bound = try data.get(try ref_id(try arg(bounds, at)))
-        if bound.kind != "FACE_OUTER_BOUND" and bound.kind != "FACE_BOUND": continue
-        let loop = try data.get(try ref_id(try arg(bound.args, 1)))
-        if loop.kind != "EDGE_LOOP": continue
-        let members = try inner(try arg(loop.args, 1))
-        let length = try count_args(members)
-        total += length
-        for item in 0..<length:
-            let oriented = try data.get(try ref_id(try arg(members, item)))
-            if oriented.kind != "ORIENTED_EDGE": continue
-            let edge = try ref_id(try arg(oriented.args, 3))
-            let index = edges.get(edge) catch failure:
-                recover 0
-            if index < 0:
-                try note(warnings, try format(line, f"Skipped STEP face #{id}: it uses edge #{edge}, which was skipped"))
-                return true
-    if total > most_face_uses:
-        try note(warnings, try format(line, f"Skipped STEP face #{id}: {total} edge uses exceed the limit of 1024"))
-        return true
-    return false
 
 func read_surface(data: Document, entity: Entity, boundary: interop.Reference[BrepModel]) -> i64!:
     if entity.kind == "PLANE" or entity.kind == "CYLINDRICAL_SURFACE" or entity.kind == "CONICAL_SURFACE" or entity.kind == "SPHERICAL_SURFACE" or entity.kind == "TOROIDAL_SURFACE":

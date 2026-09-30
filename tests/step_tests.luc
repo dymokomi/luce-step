@@ -72,21 +72,14 @@ pub func step_tests() -> unit!:
     let prism = prism_model.tessellate(4)
     assert(prism.point_count() >= 2000)
     manifold(prism)
-    # Past a budget a face is skipped with a warning naming it and the
-    # limit; the rest of the model stays. Every face over: a clean error.
-    let limited = Step.load_model("tests/fixtures/limits.step")
-    assert(limited.face_count() == 1)
-    manifold_free(limited.tessellate(4))
-    let warnings = Step.warnings()
-    assert(warnings.contains("Skipped STEP face #2216: 65 trim loops exceed the limit of 64"))
-    assert(warnings.contains("Skipped STEP face #11019: 1100 edge uses exceed the limit of 1024"))
-    assert(warnings.contains("300 control points exceed the limit of 256"))
-    assert(warnings.contains("Skipped STEP face #11344: it uses edge #"))
-    var every = ""
-    discard(Step.load_model("tests/fixtures/all_over.step")) catch failure: every = failure.message
-    assert(every.contains("every STEP face was skipped"))
+    # B-rep faces of any size: a plate with 500 holes, a star of 5000 edge
+    # uses and a loop through a 2000-control-point spline edge.
+    let big = Step.load_model("tests/fixtures/big_faces.step")
+    assert(big.face_count() == 3)
+    let big_mesh = big.tessellate(4)
+    assert(big_mesh.point_count() >= 7004)
+    manifold_free(big_mesh)
     discard(Step.load_model("tests/fixtures/cylinder.step"))
-    assert(Step.warnings() == "")
     print("PASS STEP faceted and rational surfaces, B-rep cylinder, assembly placements, colors, reflected transforms and import tolerance")
 
 ## A tessellated open sheet: one square face.
