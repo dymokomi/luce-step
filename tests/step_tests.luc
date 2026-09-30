@@ -63,4 +63,13 @@ pub func step_tests() -> unit!:
         rejected = false
         discard(Step.decode_model(text, value)) catch failure: rejected = true
         assert(rejected)
+    # Faces of any size: a 1000-corner faceted star stays one face; a
+    # B-rep prism whose caps have 1000 edge uses each meshes closed.
+    let star = Step.load_model("tests/fixtures/star_face.step").tessellate(4)
+    assert(star.face_count() == 1 and star.face_size(0) == 1000)
+    let prism_model = Step.load_model("tests/fixtures/star_prism.step")
+    assert(prism_model.face_count() == 1002)
+    let prism = prism_model.tessellate(4)
+    assert(prism.point_count() >= 2000)
+    manifold(prism)
     print("PASS STEP faceted and rational surfaces, B-rep cylinder, assembly placements, colors, reflected transforms and import tolerance")

@@ -50,8 +50,8 @@ pub struct Step:
             let loop = try data.get(try ref_id(try arg(bound.args, 1)))
             let vertices = try inner(try arg(loop.args, 1))
             let count = try count_args(vertices)
-            if count < 3 or count > 256:
-                error(invalid, "STEP face must have 3..256 corners")
+            if count < 3:
+                error(invalid, "STEP face must have at least 3 corners")
             let boundary = try alloc Vector3[count] in memory.heap
             defer free(boundary) in memory.heap
             var reverse = (try arg(bound.args, 2)) == ".F."

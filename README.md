@@ -44,8 +44,9 @@ uses a separate Transform node for scale. Shared STEP edges tessellate once.
 The Part 21 scanner handles strings, references, simple and complex entities;
 it is not a general EXPRESS schema validator. References use a bounded hash table.
 Limits: 256 MiB input, 2,097,152 entities, 8,192 B-rep faces, 32,768 shared
-vertices/edges, 64 trim loops, and the separate luce-geocore polygon-mesh budgets.
-Curves may have 256 controls; NURBS surfaces are bounded to 1,024 per direction
+vertices/edges, and luce-cad's B-rep face budget (64 trim loops, 1,024 edge
+uses); faceted faces may have any number of corners. Curves may have 256
+controls; NURBS surfaces are bounded to 1,024 per direction
 and 262,144 controls total. Entity allocation follows a counted preflight;
 topology references use hashed lookup. Spline trim endpoints must still agree
 within the chosen import tolerance; automatic tolerance healing is not enabled.
