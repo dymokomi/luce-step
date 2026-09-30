@@ -2,7 +2,7 @@
 ## surface-only rational B-splines and import tolerance.
 import files
 from step import Step
-from geocore import Vector3
+from geocore import Vector3, Mesh
 from checks import near, manifold
 
 pub func step_tests() -> unit!:
@@ -72,4 +72,23 @@ pub func step_tests() -> unit!:
     let prism = prism_model.tessellate(4)
     assert(prism.point_count() >= 2000)
     manifold(prism)
+    # Past a budget a face is skipped with a warning naming it and the
+    # limit; the rest of the model stays. Every face over: a clean error.
+    let limited = Step.load_model("tests/fixtures/limits.step")
+    assert(limited.face_count() == 1)
+    manifold_free(limited.tessellate(4))
+    let warnings = Step.warnings()
+    assert(warnings.contains("Skipped STEP face #2216: 65 trim loops exceed the limit of 64"))
+    assert(warnings.contains("Skipped STEP face #11019: 1100 edge uses exceed the limit of 1024"))
+    assert(warnings.contains("300 control points exceed the limit of 256"))
+    assert(warnings.contains("Skipped STEP face #11344: it uses edge #"))
+    var every = ""
+    discard(Step.load_model("tests/fixtures/all_over.step")) catch failure: every = failure.message
+    assert(every.contains("every STEP face was skipped"))
+    discard(Step.load_model("tests/fixtures/cylinder.step"))
+    assert(Step.warnings() == "")
     print("PASS STEP faceted and rational surfaces, B-rep cylinder, assembly placements, colors, reflected transforms and import tolerance")
+
+## A tessellated open sheet: one square face.
+func manifold_free(mesh: Mesh) -> unit!:
+    assert(mesh.face_count() >= 1 and mesh.point_count() >= 4)

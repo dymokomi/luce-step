@@ -43,11 +43,12 @@ uses a separate Transform node for scale. Shared STEP edges tessellate once.
 
 The Part 21 scanner handles strings, references, simple and complex entities;
 it is not a general EXPRESS schema validator. References use a bounded hash table.
-Limits: 256 MiB input, 2,097,152 entities, 8,192 B-rep faces, 32,768 shared
-vertices/edges, and luce-cad's B-rep face budget (64 trim loops, 1,024 edge
-uses); faceted faces may have any number of corners. Curves may have 256
-controls; NURBS surfaces are bounded to 1,024 per direction
-and 262,144 controls total. Entity allocation follows a counted preflight;
+Limits: 256 MiB input, 2,097,152 entities, 32,768 shared vertices/edges;
+faceted faces may have any number of corners. A B-rep face past luce-cad's
+face budget (64 trim loops, 1,024 edge uses), or using a spline edge of more
+than 256 controls, is skipped and named in `Step.warnings()` (the rest of the
+model stays; a file whose every face is skipped fails). NURBS surfaces are
+bounded to 1,024 per direction and 262,144 controls total. Entity allocation follows a counted preflight;
 topology references use hashed lookup. Spline trim endpoints must still agree
 within the chosen import tolerance; automatic tolerance healing is not enabled.
 Uniform surface sampling is not a tolerance-controlled CAD tessellator.

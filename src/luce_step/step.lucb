@@ -8,6 +8,11 @@ from geocore import Vector3, invalid
 from cad import CadModel, cad_model_type
 from luce_step.document import Document, arg, inner, count_args, ref_id, integer, knots, component
 from luce_step.brep_reader import read_brep
+from geocore_growing import Growing
+
+## The last decode's warnings on this thread, up to 4 KiB of whole lines.
+local var last_warnings: u8[4096]
+local var last_length: usize
 
 pub struct Step:
     let reserved: u8 = 0
@@ -18,18 +23,28 @@ pub struct Step:
         defer text.release()
         return try Step.decode_model(text.value, tolerance)
 
+    ## The warnings of this thread's last decode, one per line: B-rep faces
+    ## and edges skipped for exceeding a budget (64 loops, 1024 edge uses,
+    ## 256 spline control points), each named by its entity.
+    pub static func warnings() -> interop.Owned[str]!:
+        return try interop.copy_text((str)last_warnings[..<last_length])
+
     ## Map STEP entities into CAD, retaining the chosen tolerance for preview
     ## and subsequent tessellation. Zero keeps the source-declared uncertainty.
     pub static func decode_model(text: str, tolerance: f64 = 0.0) -> interop.Reference[CadModel]!:
         if not math.is_finite(tolerance) or (tolerance != 0.0 and (tolerance < 1e-9 or tolerance > 1.0)):
             error(invalid,"STEP import tolerance must be 0 (file) or 1e-9..1 source unit")
+        last_length = 0
         var data = try Document(text)
         defer data.close()
         let model = try interop.Reference[CadModel].adopt(new CadModel() in memory.heap, cad_model_type, memory.heap)
         errdefer model.release()
         for entity in data.records[..<data.count]:
             if entity.kind == "ADVANCED_FACE":
-                try read_brep(data, model, tolerance)
+                var warnings = Growing[u8]()
+                defer warnings.close()
+                try read_brep(data, model, tolerance, &warnings)
+                remember(warnings.view())
                 return model
         var faces: usize = 0
         for entity in data.records[..<data.count]:
@@ -122,3 +137,12 @@ pub struct Step:
         if model.value().face_count() == 0:
             error(invalid, "STEP has no supported faces or untrimmed B-spline surfaces")
         return model
+
+## `warnings` kept for `Step.warnings()`, cut to whole lines.
+func remember(text: const u8[]):
+    var length = text.length
+    if length > last_warnings.length:
+        length = last_warnings.length
+        while length > 0 and text[length - 1] != 10: length -= 1
+    memory.copy(last_warnings[..<length], text[..<length], length)
+    last_length = length

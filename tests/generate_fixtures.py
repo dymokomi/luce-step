@@ -6,6 +6,10 @@ scratch copy of tests/fixtures):
 - star_prism.step: a closed B-rep prism over a 1000-corner star: two planar
   caps of 1000 edge uses each (luce-cad's B-rep faces take up to 1024) and
   1000 planar sides, all LINE edges.
+- limits.step: four planar faces, three past a budget and skipped with a
+  warning: 65 loops (a plate with 64 holes), 1100 edge uses (a star), and a
+  loop through a 300-control-point spline edge; the fourth, a square, stays.
+- all_over.step: only the 65-loop plate, so every face is skipped.
 """
 import math
 
@@ -92,6 +96,88 @@ def star_prism(n=1000):
     return writer.text()
 
 
+class Faces:
+    """Planar B-rep faces on z = 0 from polygons, with shared vertices."""
+
+    def __init__(self):
+        self.writer = Writer()
+        self.vertices = {}
+        self.faces = []
+        self.plane = None
+
+    def vertex(self, x, y):
+        key = (round(x, 9), round(y, 9))
+        if key not in self.vertices:
+            self.vertices[key] = (self.writer.add("VERTEX_POINT('',#%d)" % point(self.writer, x, y, 0.0)), point(self.writer, x, y, 0.0))
+        return self.vertices[key]
+
+    def line(self, a, b):
+        w = self.writer
+        (va, pa), (vb, _) = self.vertex(*a), self.vertex(*b)
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        length = math.hypot(dx, dy)
+        direction = w.add("DIRECTION('',(%.12f,%.12f,0.))" % (dx / length, dy / length))
+        curve = w.add("LINE('',#%d,#%d)" % (pa, w.add("VECTOR('',#%d,%.12f)" % (direction, length))))
+        return w.add("EDGE_CURVE('',#%d,#%d,#%d,.T.)" % (va, vb, curve))
+
+    def spline(self, a, b, controls):
+        w = self.writer
+        (va, _), (vb, _) = self.vertex(*a), self.vertex(*b)
+        points = [point(w, a[0] + (b[0] - a[0]) * t / (controls - 1), a[1] + (b[1] - a[1]) * t / (controls - 1), 0.0) for t in range(controls)]
+        multiplicities = [2] + [1] * (controls - 2) + [2]
+        knots = ["%.6f" % (k / (controls - 1)) for k in range(controls)]
+        curve = w.add("B_SPLINE_CURVE_WITH_KNOTS('',1,(%s),.UNSPECIFIED.,.F.,.F.,(%s),(%s),.UNSPECIFIED.)" % (
+            ",".join("#%d" % c for c in points), ",".join(map(str, multiplicities)), ",".join(knots)))
+        return w.add("EDGE_CURVE('',#%d,#%d,#%d,.T.)" % (va, vb, curve))
+
+    def loop(self, edges, outer):
+        w = self.writer
+        uses = ",".join("#%d" % w.add("ORIENTED_EDGE('',*,*,#%d,.T.)" % e) for e in edges)
+        return w.add("%s('',#%d,.T.)" % ("FACE_OUTER_BOUND" if outer else "FACE_BOUND", w.add("EDGE_LOOP('',(%s))" % uses)))
+
+    def polygon(self, corners, outer=True):
+        return self.loop([self.line(corners[at], corners[(at + 1) % len(corners)]) for at in range(len(corners))], outer)
+
+    def face(self, bounds):
+        w = self.writer
+        if self.plane is None:
+            origin = point(w, 0.0, 0.0, 0.0)
+            self.plane = w.add("PLANE('',#%d)" % w.add("AXIS2_PLACEMENT_3D('',#%d,#%d,#%d)" % (
+                origin, w.add("DIRECTION('',(0.,0.,1.))"), w.add("DIRECTION('',(1.,0.,0.))"))))
+        self.faces.append(w.add("ADVANCED_FACE('',(%s),#%d,.T.)" % (",".join("#%d" % b for b in bounds), self.plane)))
+
+    def text(self):
+        self.writer.add("OPEN_SHELL('',(%s))" % ",".join("#%d" % f for f in self.faces))
+        return self.writer.text()
+
+
+def square(x, y, size, clockwise=False):
+    corners = [(x, y), (x + size, y), (x + size, y + size), (x, y + size)]
+    return corners[::-1] if clockwise else corners
+
+
+def plate(faces):
+    # 64 holes: 65 loops.
+    faces.face([faces.polygon(square(0.0, 0.0, 10.0))] + [faces.polygon(square(1.0 + 1.1 * i, 1.0 + 1.1 * j, 0.5, True), False) for i in range(8) for j in range(8)])
+
+
+def limits():
+    faces = Faces()
+    plate(faces)
+    faces.face([faces.polygon([(20.0 + x, y) for x, y in star(1100)])])
+    faces.face([faces.loop([faces.spline((30.0, 0.0), (32.0, 0.0), 300), faces.line((32.0, 0.0), (31.0, 1.0)), faces.line((31.0, 1.0), (30.0, 0.0))], True)])
+    faces.face([faces.polygon(square(40.0, 0.0, 1.0))])
+    return faces.text()
+
+
+def all_over():
+    faces = Faces()
+    plate(faces)
+    return faces.text()
+
+
 def write_fixtures(directory):
     (directory / "star_face.step").write_text(star_face())
     (directory / "star_prism.step").write_text(star_prism())
+    (directory / "limits.step").write_text(limits())
+    (directory / "all_over.step").write_text(all_over())
