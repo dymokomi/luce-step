@@ -1,7 +1,7 @@
 import memory
 import strings
-from geocore import Vector3, invalid
-from luce_step.entity_count import entity_count
+from luce_geocore.geocore import Vector3, invalid
+from entity_count import entity_count
 
 pub struct Entity:
     pub let id: i64

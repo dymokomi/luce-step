@@ -1,10 +1,10 @@
 ## Unique-occurrence rigid STEP assemblies; repeated instances fail explicitly.
 import interop
 import strings
-from geocore import Matrix4, Vector3, invalid
-from cad import BrepModel
-from luce_step.document import Document, arg, inner, count_args, ref_id, component
-from luce_step.placements import placement
+from luce_geocore.geocore import Matrix4, Vector3, invalid
+from luce_cad.model import BrepModel
+from document import Document, arg, inner, count_args, ref_id, component
+from placements import placement
 
 func frame(data: Document, reference: str) -> Matrix4!:
     let p = try placement(data, reference)

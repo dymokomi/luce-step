@@ -1,8 +1,8 @@
 ## STEP Part 21 import: faceted faces, B-reps, colors, assembly placements,
 ## surface-only rational B-splines and import tolerance.
-import files
-from step import Step
-from geocore import Vector3, Mesh
+import luce_std.files
+from luce_step.step import Step
+from luce_geocore.geocore import Vector3, Mesh
 from checks import near, manifold
 
 pub func step_tests() -> unit!:

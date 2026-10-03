@@ -2,9 +2,9 @@
 ## Geometry placement stays in assemblies; this module only assigns identity.
 import interop
 import strings
-from geocore import invalid
-from cad import BrepModel
-from luce_step.document import Document, arg, inner, count_args, ref_id
+from luce_geocore.geocore import invalid
+from luce_cad.model import BrepModel
+from document import Document, arg, inner, count_args, ref_id
 
 func name(builder: strings.Builder*, text: str) -> !:
     if text.length >= 2 and text.bytes[0] == 39 and text.bytes[text.length - 1] == 39:

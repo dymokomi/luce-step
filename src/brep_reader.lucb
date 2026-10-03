@@ -3,14 +3,14 @@ import interop
 import ownership
 import memory
 import strings
-from geocore import Vector3, invalid
-from geocore_growing import Growing
-from cad import CadModel, BrepModel, brep_model_type
-from luce_step.document import Document, Entity, arg, inner, count_args, ref_id, integer, knots, component
-from luce_step.colors import apply_colors
-from luce_step.placements import placement
-from luce_step.assemblies import apply_placements
-from luce_step.hierarchy import apply_hierarchy
+from luce_geocore.geocore import Vector3, invalid
+from luce_geocore.core.growing import Growing
+from luce_cad.model import CadModel, BrepModel, brep_model_type
+from document import Document, Entity, arg, inner, count_args, ref_id, integer, knots, component
+from colors import apply_colors
+from placements import placement
+from assemblies import apply_placements
+from hierarchy import apply_hierarchy
 
 struct IdMap:
     let ids: i64[]

@@ -1,5 +1,5 @@
 ## Preflight capacity without materializing token strings or reference lists.
-from geocore import invalid
+from luce_geocore.geocore import invalid
 pub func entity_count(text: str) -> usize!:
     var count: usize = 0
     var at: usize = 0
