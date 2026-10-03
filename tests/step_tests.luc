@@ -1,6 +1,6 @@
 ## STEP Part 21 import: faceted faces, B-reps, colors, assembly placements,
 ## surface-only rational B-splines and import tolerance.
-import luce_std.files
+from luce_std import files
 from luce_step.step import Step
 from luce_geocore.geocore import Vector3, Mesh
 from checks import near, manifold
