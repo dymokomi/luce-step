@@ -44,24 +44,24 @@ pub func step_tests() -> unit!:
     # Source uncertainty remains authoritative unless this import overrides it.
     let text = files.read_text("tests/fixtures/cylinder.step").replace("(2.,0.,0.)", "(2.00005,0.,0.)")
     var rejected = false
-    discard(Step.decode_model(text)) catch failure: rejected = true
+    _ = Step.decode_model(text) catch failure: rejected = true
     assert(rejected)
     assert(Step.decode_model(text, 0.0001).face_count() == 3)
     let declared = text.replace("DATA;", "DATA;#500=UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(0.0001),#501,'','');")
     assert(Step.decode_model(declared).face_count() == 3)
     rejected = false
-    discard(Step.decode_model(declared, 0.000001)) catch failure: rejected = true
+    _ = Step.decode_model(declared, 0.000001) catch failure: rejected = true
     assert(rejected) # Explicit tighter settings must not become max(file, user).
     let precise = files.read_text("tests/fixtures/cylinder.step").replace("(2.,0.,0.)", "(2.0000005,0.,0.)")
     assert(Step.decode_model(precise).face_count() == 3) # Undeclared 1e-6 fallback.
     let strict = precise.replace("DATA;", "DATA;#500=UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(0.0000001),#501,'','');")
     rejected = false
-    discard(Step.decode_model(strict)) catch failure: rejected = true
+    _ = Step.decode_model(strict) catch failure: rejected = true
     assert(rejected) # Source uncertainty below the fallback must remain strict.
     assert(Step.decode_model(strict, 0.000001).face_count() == 3)
     for value in [-0.01, 0.0000000001, 1.01]:
         rejected = false
-        discard(Step.decode_model(text, value)) catch failure: rejected = true
+        _ = Step.decode_model(text, value) catch failure: rejected = true
         assert(rejected)
     # Faces of any size: a 1000-corner faceted star stays one face; a
     # B-rep prism whose caps have 1000 edge uses each meshes closed.
@@ -79,7 +79,7 @@ pub func step_tests() -> unit!:
     let big_mesh = big.tessellate(4)
     assert(big_mesh.point_count() >= 7004)
     manifold_free(big_mesh)
-    discard(Step.load_model("tests/fixtures/cylinder.step"))
+    _ = Step.load_model("tests/fixtures/cylinder.step")
     print("PASS STEP faceted and rational surfaces, B-rep cylinder, assembly placements, colors, reflected transforms and import tolerance")
 
 ## A tessellated open sheet: one square face.
