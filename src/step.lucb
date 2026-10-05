@@ -14,14 +14,14 @@ pub struct Step:
 
     ## Read analytic CAD. Zero tolerance uses STEP uncertainty; a positive
     ## override (1e-9..1 in source units) belongs to this import, not a global.
-    pub func load_model(path: str, tolerance: f64 = 0.0) -> interop.Reference[CadModel]!:
+    pub static func load_model(path: str, tolerance: f64 = 0.0) -> interop.Reference[CadModel]!:
         let text = try files.read_text(path, 268435456)
         defer text.release()
         return try Step.decode_model(text.value, tolerance)
 
     ## Map STEP entities into CAD, retaining the chosen tolerance for preview
     ## and subsequent tessellation. Zero keeps the source-declared uncertainty.
-    pub func decode_model(text: str, tolerance: f64 = 0.0) -> interop.Reference[CadModel]!:
+    pub static func decode_model(text: str, tolerance: f64 = 0.0) -> interop.Reference[CadModel]!:
         if not math.is_finite(tolerance) or (tolerance != 0.0 and (tolerance < 1e-9 or tolerance > 1.0)):
             error(invalid, "STEP import tolerance must be 0 (file) or 1e-9..1 source unit")
         var data = try Document(text)
