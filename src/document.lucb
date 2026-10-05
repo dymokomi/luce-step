@@ -12,13 +12,14 @@ pub struct Document:
     pub let records: Entity[]
     pub let slots: i64[]
     pub var count: usize
+
     pub func init(text: str) -> !:
         if text.length > 268435456 or not strings.starts_with(trim(text), "ISO-10303-21;") or not strings.contains(text, "END-ISO-10303-21;"):
             error(invalid, "expected STEP Part 21 header")
         let capacity = try entity_count(text)
-        let records = try alloc Entity[capacity] in memory.heap
+        let records = try new Entity[capacity] --- in memory.heap
         errdefer free(records) in memory.heap
-        let slots = try alloc i64[capacity * 2 + 1] in memory.heap
+        let slots = try new i64[capacity * 2 + 1] --- in memory.heap
         errdefer free(slots) in memory.heap
         for index in 0..<slots.length:
             slots[index] = -1
@@ -71,6 +72,7 @@ pub struct Document:
             self.records[self.count] = Entity(id, "COMPLEX" if split == 0 else trim((str)record.bytes[..<split]), try inner((str)record.bytes[split..]))
             self.count += 1
             at += 1
+
     pub func get(id: i64) -> Entity!:
         var slot = (usize)id % self.slots.length
         while self.slots[slot] >= 0:
@@ -79,13 +81,15 @@ pub struct Document:
                 return record
             slot = (slot + 1) % self.slots.length
         error(invalid, "STEP reference has no definition")
+
     pub func point(id: i64) -> Vector3!:
         let entity = try self.get(id)
         if entity.kind != "CARTESIAN_POINT":
             error(invalid, "STEP reference is not a Cartesian point")
         let values = try inner(try arg(entity.args, 1))
         return Vector3(try strings.parse_f64(try arg(values, 0)), try strings.parse_f64(try arg(values, 1)), try strings.parse_f64(try arg(values, 2)))
-    pub mutating func close():
+
+    pub func close():
         free(self.records) in memory.heap
         free(self.slots) in memory.heap
 
@@ -203,7 +207,7 @@ pub func knots(multiplicities: str, values: str) -> f64[]!:
         if count < 1 or count > 9 or total + (usize)count > 4105:
             error(invalid, "invalid STEP knot multiplicity")
         total += (usize)count
-    let result = try alloc f64[total] in memory.heap
+    let result = try new f64[total] --- in memory.heap
     errdefer free(result) in memory.heap
     var at: usize = 0
     for index in 0..<length:

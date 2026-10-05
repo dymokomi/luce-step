@@ -16,13 +16,15 @@ struct IdMap:
     let ids: i64[]
     let values: i64[]
     var count: usize = 0
+
     func init() -> !:
         self.count = 0
-        self.ids = try alloc i64[131072] in memory.heap
+        self.ids = try new i64[131072] --- in memory.heap
         errdefer free(self.ids) in memory.heap
-        self.values = try alloc i64[131072] in memory.heap
+        self.values = try new i64[131072] --- in memory.heap
         for index in 0..<self.ids.length: self.ids[index] = -1
-    mutating func put(id: i64, value: i64) -> !:
+
+    func put(id: i64, value: i64) -> !:
         if self.count >= self.ids.length // 2:
             error(invalid, "STEP topology map limit exceeded")
         var slot = (usize)id % self.ids.length
@@ -30,16 +32,17 @@ struct IdMap:
         self.ids[slot] = id
         self.values[slot] = value
         self.count += 1
+
     func get(id: i64) -> i64!:
         var slot = (usize)id % self.ids.length
         while self.ids[slot] >= 0:
             if self.ids[slot] == id: return self.values[slot]
             slot = (slot + 1) % self.ids.length
         error(invalid, "STEP topology reference is missing")
-    mutating func close():
+
+    func close():
         free(self.ids) in memory.heap
         free(self.values) in memory.heap
-
 
 ## B-rep faces of any number of loops and edge uses, and spline edges of
 ## any number of control points.
@@ -105,9 +108,9 @@ pub func read_brep(data: Document, model: interop.Reference[CadModel], tolerance
             let count = try count_args(controls)
             if count < 2:
                 error(invalid, "STEP spline edge needs two control points")
-            let points = try alloc Vector3[count] in memory.heap
+            let points = try new Vector3[count] --- in memory.heap
             defer free(points) in memory.heap
-            let weights = try alloc f64[count] in memory.heap
+            let weights = try new f64[count] --- in memory.heap
             defer free(weights) in memory.heap
             let rational = complex and strings.contains(curve.args, "RATIONAL_B_SPLINE_CURVE(")
             let weight_values = try inner(try arg(try component(curve.args, "RATIONAL_B_SPLINE_CURVE("), 0)) if rational else ""
@@ -122,8 +125,8 @@ pub func read_brep(data: Document, model: interop.Reference[CadModel], tolerance
             defer free(expanded) in memory.heap
             index = boundary.value().add_spline_edge(first, last, points, weights, try integer(try arg(spline, offset)), expanded, sense) catch failure:
                 var buffer: u8[512]
-                let message = try interop.copy_text(try format(buffer, f"STEP edge #{entity.id}, curve #{curve.id}: {failure.message}"))
-                if let owner = message.owner: discard(ownership.pool_object(owner))
+                let message = try interop.copy_text(try strings.format(buffer, f"STEP edge #{entity.id}, curve #{curve.id}: {failure.message}"))
+                if let owner = message.owner: _ = ownership.pool_object(owner)
                 error(failure.code, message.value)
         else:
             error(invalid, "unsupported STEP boundary curve")
@@ -176,7 +179,7 @@ pub func read_brep(data: Document, model: interop.Reference[CadModel], tolerance
                     let positive = ((try arg(oriented.args, 4)) == ".T.") == forward
                     uses.items[total + (item if forward else length - 1 - item)] = edge if positive else -edge
                 try sizes.push((i64)length)
-        discard(try boundary.value().add_face(surface_index, uses.view(), sizes.view(), (try arg(entity.args, 3)) == ".T."))
+        _ = try boundary.value().add_face(surface_index, uses.view(), sizes.view(), (try arg(entity.args, 3)) == ".T.")
         try face_ids.push(entity.id)
     try apply_colors(data, boundary, face_ids.view())
     try apply_placements(data, boundary, face_ids.view())
@@ -202,9 +205,9 @@ func read_surface(data: Document, entity: Entity, boundary: interop.Reference[Br
     let nv = try count_args(try inner(try arg(rows, 0)))
     if nu < 2 or nu > 1024 or nv < 2 or nv > 1024 or nu * nv > 262144:
         error(invalid, "STEP spline surface control net limit exceeded")
-    let points = try alloc Vector3[nu * nv] in memory.heap
+    let points = try new Vector3[nu * nv] --- in memory.heap
     defer free(points) in memory.heap
-    let weights = try alloc f64[nu * nv] in memory.heap
+    let weights = try new f64[nu * nv] --- in memory.heap
     defer free(weights) in memory.heap
     let rational = complex and strings.contains(entity.args, "RATIONAL_B_SPLINE_SURFACE(")
     let weight_rows = try inner(try arg(try component(entity.args, "RATIONAL_B_SPLINE_SURFACE("), 0)) if rational else ""

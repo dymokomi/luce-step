@@ -16,7 +16,7 @@ func name(builder: strings.Builder*, text: str) -> !:
             elif byte == 37:
                 try builder.put("%25")
             else:
-                discard(try builder.write(text.bytes[at..<at + 1]))
+                _ = try builder.write(text.bytes[at..<at + 1])
             if byte == 39 and at + 2 < text.length and text.bytes[at + 1] == 39:
                 at += 1
             at += 1
@@ -69,7 +69,7 @@ func assign(data: Document, boundary: interop.Reference[BrepModel], ids: const i
         let label = try arg(record.args, 0)
         if label == "''" or label == "$":
             var buffer: u8[64]
-            try full.put(try format(buffer, f"solid_{record.id}"))
+            try full.put(try strings.format(buffer, f"solid_{record.id}"))
         else:
             try name(&full, label)
         try assign(data, boundary, ids, try ref_id(try arg(record.args, 1)), full.view(), depth + 1)

@@ -11,18 +11,19 @@ from brep_reader import read_brep
 
 pub struct Step:
     let reserved: u8 = 0
+
     ## Read analytic CAD. Zero tolerance uses STEP uncertainty; a positive
     ## override (1e-9..1 in source units) belongs to this import, not a global.
-    pub static func load_model(path: str, tolerance: f64 = 0.0) -> interop.Reference[CadModel]!:
+    pub func load_model(path: str, tolerance: f64 = 0.0) -> interop.Reference[CadModel]!:
         let text = try files.read_text(path, 268435456)
         defer text.release()
         return try Step.decode_model(text.value, tolerance)
 
     ## Map STEP entities into CAD, retaining the chosen tolerance for preview
     ## and subsequent tessellation. Zero keeps the source-declared uncertainty.
-    pub static func decode_model(text: str, tolerance: f64 = 0.0) -> interop.Reference[CadModel]!:
+    pub func decode_model(text: str, tolerance: f64 = 0.0) -> interop.Reference[CadModel]!:
         if not math.is_finite(tolerance) or (tolerance != 0.0 and (tolerance < 1e-9 or tolerance > 1.0)):
-            error(invalid,"STEP import tolerance must be 0 (file) or 1e-9..1 source unit")
+            error(invalid, "STEP import tolerance must be 0 (file) or 1e-9..1 source unit")
         var data = try Document(text)
         defer data.close()
         let model = try interop.Reference[CadModel].adopt(new CadModel() in memory.heap, cad_model_type, memory.heap)
@@ -52,7 +53,7 @@ pub struct Step:
             let count = try count_args(vertices)
             if count < 3:
                 error(invalid, "STEP face must have at least 3 corners")
-            let boundary = try alloc Vector3[count] in memory.heap
+            let boundary = try new Vector3[count] --- in memory.heap
             defer free(boundary) in memory.heap
             var reverse = (try arg(bound.args, 2)) == ".F."
             if entity.kind != "FACE" and (try arg(entity.args, 3)) == ".F.":
@@ -94,9 +95,9 @@ pub struct Step:
             let nv = try count_args(try inner(try arg(rows, 0)))
             if nu < 2 or nu > 1024 or nv < 2 or nv > 1024 or nu * nv > 262144:
                 error(invalid, "STEP B-spline control net exceeds limits")
-            let points = try alloc Vector3[nu * nv] in memory.heap
+            let points = try new Vector3[nu * nv] --- in memory.heap
             defer free(points) in memory.heap
-            let weights = try alloc f64[nu * nv] in memory.heap
+            let weights = try new f64[nu * nv] --- in memory.heap
             defer free(weights) in memory.heap
             for u in 0..<nu:
                 let row = try inner(try arg(rows, u))
