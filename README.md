@@ -55,7 +55,7 @@ Uniform surface sampling is not a tolerance-controlled CAD tessellator.
 
 `./test.sh` runs the Luce regressions in `tests/` (faceted and rational
 surfaces, B-rep cylinder, assembly placements, colors, reflected transforms and
-import tolerance) native and through the C backend; CI pins the compilers and
-sibling packages in `bootstrap/PACKAGES`. The external-file probe
+import tolerance) native and through the C backend; CI builds the compilers and
+checks out the sibling packages at main. The external-file probe
 `luced-3d/tools/cad_probe.py` tests a real STEP against a reference OBJ without
 using that OBJ to generate geometry. See `luced-3d/docs/CAD_TESSELLATION.md`.
