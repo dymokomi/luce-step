@@ -2,26 +2,27 @@
 ## Geometry placement stays in assemblies; this module only assigns identity.
 import interop
 import strings
+from luce_std import collections
 from luce_geocore.geocore import invalid
 from luce_cad.model import BrepModel
 from document import Document, arg, inner, count_args, ref_id
 
-func name(builder: strings.Builder*, text: str) -> !:
+func name(builder: collections.Buffer*, text: str) -> !:
     if text.length >= 2 and text.bytes[0] == 39 and text.bytes[text.length - 1] == 39:
         var at: usize = 1
         while at + 1 < text.length:
             let byte = text.bytes[at]
             if byte == 47:
-                try builder.put("%2F")
+                try builder.put_text("%2F")
             elif byte == 37:
-                try builder.put("%25")
+                try builder.put_text("%25")
             else:
                 _ = try builder.write(text.bytes[at..<at + 1])
             if byte == 39 and at + 2 < text.length and text.bytes[at + 1] == 39:
                 at += 1
             at += 1
 
-func product_path(data: Document, product: i64, builder: strings.Builder*, depth: usize = 0) -> !:
+func product_path(data: Document, product: i64, builder: collections.Buffer*, depth: usize = 0) -> !:
     if depth > 32:
         error(invalid, "STEP product hierarchy contains a cycle")
     var occurrence: str = ""
@@ -34,7 +35,7 @@ func product_path(data: Document, product: i64, builder: strings.Builder*, depth
             occurrence = try arg(record.args, 1)
     if parent >= 0:
         try product_path(data, parent, builder, depth + 1)
-        try builder.put("/")
+        try builder.put_text("/")
     if occurrence != "" and occurrence != "''" and occurrence != "$":
         try name(builder, occurrence)
         return
@@ -62,17 +63,17 @@ func assign(data: Document, boundary: interop.Reference[BrepModel], ids: const i
                 try boundary.value().set_face_path((i64)index, path)
                 return
     elif record.kind == "MANIFOLD_SOLID_BREP":
-        var full = try strings.Builder.create()
+        var full: collections.Buffer
         defer full.destroy()
-        try full.put(path)
-        if path.length > 0: try full.put("/")
+        try full.put_text(path)
+        if path.length > 0: try full.put_text("/")
         let label = try arg(record.args, 0)
         if label == "''" or label == "$":
             var buffer: u8[64]
-            try full.put(try strings.format(buffer, f"solid_{record.id}"))
+            try full.put_text(try strings.format(buffer, f"solid_{record.id}"))
         else:
             try name(&full, label)
-        try assign(data, boundary, ids, try ref_id(try arg(record.args, 1)), full.view(), depth + 1)
+        try assign(data, boundary, ids, try ref_id(try arg(record.args, 1)), full.text(), depth + 1)
     elif record.kind == "CLOSED_SHELL" or record.kind == "OPEN_SHELL" or record.kind == "ADVANCED_BREP_SHAPE_REPRESENTATION":
         let members = try inner(try arg(record.args, 1))
         for at in 0..<(try count_args(members)):
@@ -90,7 +91,7 @@ pub func apply_hierarchy(data: Document, boundary: interop.Reference[BrepModel],
                 if a == representation.id or b == representation.id:
                     product = try representation_product(data, b if a == representation.id else a)
                     if product >= 0: break
-        var path = try strings.Builder.create()
+        var path: collections.Buffer
         defer path.destroy()
         if product >= 0: try product_path(data, product, &path)
-        try assign(data, boundary, ids, representation.id, path.view())
+        try assign(data, boundary, ids, representation.id, path.text())
