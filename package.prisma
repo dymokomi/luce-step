@@ -9,17 +9,14 @@ def package "luce-step" {
     str[] public = ["step"]
     def dependency "luce-geocore" {
         str owner = "dymokomi"
-        str version = "^0.7.0"
         str path = "../luce-geocore"
     }
     def dependency "luce-cad" {
         str owner = "dymokomi"
-        str version = "^0.9.0"
         str path = "../luce-cad"
     }
     def dependency "luce-std" {
         str owner = "dymokomi"
-        str version = "^0.6.0"
         str path = "../luce-std"
     }
 }
