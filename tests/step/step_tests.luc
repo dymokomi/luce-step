@@ -5,7 +5,7 @@ from luce_step.step import Step
 from luce_geocore.geocore import Vector3, Mesh
 from checks import near, manifold
 
-pub func step_tests() -> unit!:
+pub func step_tests(scratch: str) -> unit!:
     let faceted = "ISO-10303-21;HEADER;ENDSEC;DATA;#1=CARTESIAN_POINT('',(0.,0.,0.));#2=CARTESIAN_POINT('',(1.,0.,0.));#3=CARTESIAN_POINT('',(0.,1.,0.));#4=POLY_LOOP('',(#1,#2,#3));#5=FACE_OUTER_BOUND('',#4,.T.);#6=FACE('',(#5));ENDSEC;END-ISO-10303-21;"
     let step_mesh = Step.decode_model(faceted).tessellate(16)
     assert(step_mesh.point_count() == 3 and step_mesh.face_count() == 1)
@@ -15,10 +15,10 @@ pub func step_tests() -> unit!:
     let rational = Step.decode_model("ISO-10303-21;HEADER;ENDSEC;DATA;" + points + "#5=(BOUNDED_SURFACE() B_SPLINE_SURFACE(1,1,((#1,#2),(#3,#4)),.UNSPECIFIED.,.F.,.F.,.F.) B_SPLINE_SURFACE_WITH_KNOTS((2,2),(2,2),(0.,1.),(0.,1.),.UNSPECIFIED.) GEOMETRIC_REPRESENTATION_ITEM() RATIONAL_B_SPLINE_SURFACE(((1.,1.),(1.,1.))) REPRESENTATION_ITEM('') SURFACE());ENDSEC;END-ISO-10303-21;").tessellate(2)
     near(rational.point(4).x, 1.0)
     near(rational.point(4).z, 1.0)
-    let loaded = Step.load_model("tests/fixtures/cylinder.step")
+    let loaded = Step.load_model("fixtures/cylinder.step")
     assert(loaded.face_count() == 3 and loaded.edge_count() == 3)
     manifold(loaded.tessellate(4))
-    let assembly = Step.load_model("tests/fixtures/assembly.step")
+    let assembly = Step.load_model("fixtures/assembly.step")
     let placed_face = assembly.preview_face(0, 4)
     near(placed_face.bounds().minimum.x, 8.0)
     near(placed_face.bounds().maximum.x, 12.0)
@@ -42,7 +42,7 @@ pub func step_tests() -> unit!:
         near(colored.attribute_value(cd, face, 1), 0.807843 if cap else 0.172549)
         near(colored.attribute_value(cd, face, 2), 0.764706 if cap else 0.172549)
     # Source uncertainty remains authoritative unless this import overrides it.
-    let text = files.read_text("tests/fixtures/cylinder.step").replace("(2.,0.,0.)", "(2.00005,0.,0.)")
+    let text = files.read_text("fixtures/cylinder.step").replace("(2.,0.,0.)", "(2.00005,0.,0.)")
     var rejected = false
     _ = Step.decode_model(text) catch failure: rejected = true
     assert(rejected)
@@ -52,7 +52,7 @@ pub func step_tests() -> unit!:
     rejected = false
     _ = Step.decode_model(declared, 0.000001) catch failure: rejected = true
     assert(rejected) # Explicit tighter settings must not become max(file, user).
-    let precise = files.read_text("tests/fixtures/cylinder.step").replace("(2.,0.,0.)", "(2.0000005,0.,0.)")
+    let precise = files.read_text("fixtures/cylinder.step").replace("(2.,0.,0.)", "(2.0000005,0.,0.)")
     assert(Step.decode_model(precise).face_count() == 3) # Undeclared 1e-6 fallback.
     let strict = precise.replace("DATA;", "DATA;#500=UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(0.0000001),#501,'','');")
     rejected = false
@@ -65,21 +65,21 @@ pub func step_tests() -> unit!:
         assert(rejected)
     # Faces of any size: a 1000-corner faceted star stays one face; a
     # B-rep prism whose caps have 1000 edge uses each meshes closed.
-    let star = Step.load_model("tests/fixtures/star_face.step").tessellate(4)
+    let star = Step.load_model(f"{scratch}/star_face.step").tessellate(4)
     assert(star.face_count() == 1 and star.face_size(0) == 1000)
-    let prism_model = Step.load_model("tests/fixtures/star_prism.step")
+    let prism_model = Step.load_model(f"{scratch}/star_prism.step")
     assert(prism_model.face_count() == 1002)
     let prism = prism_model.tessellate(4)
     assert(prism.point_count() >= 2000)
     manifold(prism)
     # B-rep faces of any size: a plate with 500 holes, a star of 5000 edge
     # uses and a loop through a 2000-control-point spline edge.
-    let big = Step.load_model("tests/fixtures/big_faces.step")
+    let big = Step.load_model(f"{scratch}/big_faces.step")
     assert(big.face_count() == 3)
     let big_mesh = big.tessellate(4)
     assert(big_mesh.point_count() >= 7004)
     manifold_free(big_mesh)
-    _ = Step.load_model("tests/fixtures/cylinder.step")
+    _ = Step.load_model("fixtures/cylinder.step")
     print("PASS STEP faceted and rational surfaces, B-rep cylinder, assembly placements, colors, reflected transforms and import tolerance")
 
 ## A tessellated open sheet: one square face.

@@ -1,0 +1,241 @@
+## Generated STEP fixtures for faces of any size, written when the tests run:
+##
+## - star_face.step: one faceted FACE whose POLY_LOOP has 1000 corners, a star (radii 1
+##   and 0.8 alternating, so every other corner is concave).
+## - star_prism.step: a closed B-rep prism over a 1000-corner star: two planar caps of
+##   1000 edge uses each and 1000 planar sides, all LINE edges.
+## - big_faces.step: three planar B-rep faces past luce-cad's old per-face budgets: a
+##   plate with 500 square holes (501 loops), a star of 5000 edge uses, and a loop through
+##   a 2000-control-point spline edge.
+from luce_std import files, math, paths
+
+pub func write_fixtures(directory: str) -> unit!:
+    files.write_text(paths.join(directory, "star_face.step"), star_face())
+    files.write_text(paths.join(directory, "star_prism.step"), star_prism(1000))
+    files.write_text(paths.join(directory, "big_faces.step"), big_faces())
+
+## A star of `count` corners, radii 1 and 0.8 alternating.
+func star(count: int) -> list[(float, float)]:
+    var corners: list[(float, float)] = []
+    for at in 0..<count:
+        let radius = 1.0 if at % 2 == 0 else 0.8
+        let angle = 2.0 * math.pi * float(at) / float(count)
+        corners.append((radius * math.cos(angle), radius * math.sin(angle)))
+    return corners
+
+## A Part 21 file in the making: each entity is numbered by its place.
+class Writer:
+    var lines: list[str] = []
+
+    func add(self, text: str) -> int:
+        self.lines.append(text)
+        return self.lines.length
+
+    func text(self) -> str:
+        var body: list[str] = []
+        for at in 0..<self.lines.length:
+            body.append(f"#{at + 1}={self.lines[at]};\n")
+        return "ISO-10303-21;\nHEADER;ENDSEC;\nDATA;\n" + body.join("") + "ENDSEC;\nEND-ISO-10303-21;\n"
+
+func point(writer: Writer, x: float, y: float, z: float) -> int:
+    return writer.add(f"CARTESIAN_POINT('',({x:.9f},{y:.9f},{z:.9f}))")
+
+func direction(writer: Writer, x: float, y: float, z: float) -> int:
+    return writer.add(f"DIRECTION('',({x:.12f},{y:.12f},{z:.12f}))")
+
+func references(entities: list[int]) -> str:
+    var parts: list[str] = []
+    for entity in entities:
+        parts.append(f"#{entity}")
+    return parts.join(",")
+
+func star_face() -> str:
+    let writer = Writer()
+    var corners: list[int] = []
+    for (x, y) in star(1000):
+        corners.append(point(writer, x, y, 0.0))
+    let loop = writer.add(f"POLY_LOOP('',({references(corners)}))")
+    let bound = writer.add(f"FACE_OUTER_BOUND('',#{loop},.T.)")
+    _ = writer.add(f"FACE('',(#{bound}))")
+    return writer.text()
+
+## The prism's geometry and entities while it is written.
+class Prism:
+    let writer: Writer
+    let ring: list[(float, float)]
+    let n: int
+    var points: list[int] = []
+    var vertices: list[int] = []
+
+    func init(self, writer: Writer, n: int):
+        self.writer = writer
+        self.ring = star(n)
+        self.n = n
+
+    func corner(self, at: int) -> (float, float, float):
+        let (x, y) = self.ring[at % self.n]
+        return (x, y, 0.0 if at < self.n else 1.0)
+
+    func line(self, a: int, b: int) -> int:
+        let (ax, ay, az) = self.corner(a)
+        let (bx, by, bz) = self.corner(b)
+        let dx = bx - ax
+        let dy = by - ay
+        let dz = bz - az
+        let length = math.sqrt(dx * dx + dy * dy + dz * dz)
+        let along = direction(self.writer, dx / length, dy / length, dz / length)
+        let vector = self.writer.add(f"VECTOR('',#{along},{length:.12f})")
+        let curve = self.writer.add(f"LINE('',#{self.points[a]},#{vector})")
+        return self.writer.add(f"EDGE_CURVE('',#{self.vertices[a]},#{self.vertices[b]},#{curve},.T.)")
+
+    func oriented(self, edge: int, forward: bool) -> int:
+        return self.writer.add(f"ORIENTED_EDGE('',*,*,#{edge},{".T." if forward else ".F."})")
+
+    func plane(self, origin: (float, float, float), axis: (float, float, float), reference: (float, float, float)) -> int:
+        let (ox, oy, oz) = origin
+        let o = point(self.writer, ox, oy, oz)
+        let (ax, ay, az) = axis
+        let a = direction(self.writer, ax, ay, az)
+        let (rx, ry, rz) = reference
+        let r = direction(self.writer, rx, ry, rz)
+        let placement = self.writer.add(f"AXIS2_PLACEMENT_3D('',#{o},#{a},#{r})")
+        return self.writer.add(f"PLANE('',#{placement})")
+
+    func face(self, uses: list[int], surface: int, sense: bool) -> int:
+        let loop = self.writer.add(f"EDGE_LOOP('',({references(uses)}))")
+        let bound = self.writer.add(f"FACE_OUTER_BOUND('',#{loop},.T.)")
+        return self.writer.add(f"ADVANCED_FACE('',(#{bound}),#{surface},{".T." if sense else ".F."})")
+
+func star_prism(n: int) -> str:
+    let writer = Writer()
+    let prism = Prism(writer, n)
+    for z in [0.0, 1.0]:
+        for (x, y) in prism.ring:
+            prism.points.append(point(writer, x, y, z))
+    for p in prism.points:
+        prism.vertices.append(writer.add(f"VERTEX_POINT('',#{p})"))
+    var bottom: list[int] = []
+    var top: list[int] = []
+    var upright: list[int] = []
+    for at in 0..<n:
+        bottom.append(prism.line(at, (at + 1) % n))
+    for at in 0..<n:
+        top.append(prism.line(n + at, n + (at + 1) % n))
+    for at in 0..<n:
+        upright.append(prism.line(at, n + at))
+    var faces: list[int] = []
+    # the caps' loops run counterclockwise about their outward normals
+    var down: list[int] = []
+    for at in 0..<n:
+        down.append(prism.oriented(bottom[n - 1 - at], false))
+    faces.append(prism.face(down, prism.plane((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), (1.0, 0.0, 0.0)), false))
+    var up: list[int] = []
+    for at in 0..<n:
+        up.append(prism.oriented(top[at], true))
+    faces.append(prism.face(up, prism.plane((0.0, 0.0, 1.0), (0.0, 0.0, 1.0), (1.0, 0.0, 0.0)), true))
+    for at in 0..<n:
+        let following = (at + 1) % n
+        let (ax, ay) = prism.ring[at]
+        let (bx, by) = prism.ring[following]
+        let length = math.sqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay))
+        let along = ((bx - ax) / length, (by - ay) / length, 0.0)
+        let outward = ((by - ay) / length, -((bx - ax) / length), 0.0)
+        let uses = [prism.oriented(bottom[at], true), prism.oriented(upright[following], true),
+                    prism.oriented(top[at], false), prism.oriented(upright[at], false)]
+        faces.append(prism.face(uses, prism.plane((ax, ay, 0.0), outward, along), true))
+    let shell = writer.add(f"CLOSED_SHELL('',({references(faces)}))")
+    _ = writer.add(f"MANIFOLD_SOLID_BREP('',#{shell})")
+    return writer.text()
+
+## Planar B-rep faces on z = 0 from polygons, with shared vertices.
+class Faces:
+    let writer: Writer
+    var vertices: map[str, (int, int)] = {}
+    var faces: list[int] = []
+    var plane: int = 0
+
+    func init(self):
+        self.writer = Writer()
+
+    func vertex(self, x: float, y: float) -> (int, int):
+        let key = f"{x:.9f} {y:.9f}"
+        if let known = self.vertices[key]:
+            return known
+        let at = point(self.writer, x, y, 0.0)
+        let made = (self.writer.add(f"VERTEX_POINT('',#{at})"), point(self.writer, x, y, 0.0))
+        self.vertices[key] = made
+        return made
+
+    func line(self, a: (float, float), b: (float, float)) -> int:
+        let (ax, ay) = a
+        let (bx, by) = b
+        let (va, pa) = self.vertex(ax, ay)
+        let (vb, _) = self.vertex(bx, by)
+        let dx = bx - ax
+        let dy = by - ay
+        let length = math.sqrt(dx * dx + dy * dy)
+        let along = self.writer.add(f"DIRECTION('',({dx / length:.12f},{dy / length:.12f},0.))")
+        let vector = self.writer.add(f"VECTOR('',#{along},{length:.12f})")
+        let curve = self.writer.add(f"LINE('',#{pa},#{vector})")
+        return self.writer.add(f"EDGE_CURVE('',#{va},#{vb},#{curve},.T.)")
+
+    func spline(self, a: (float, float), b: (float, float), controls: int) -> int:
+        let (ax, ay) = a
+        let (bx, by) = b
+        let (va, _) = self.vertex(ax, ay)
+        let (vb, _) = self.vertex(bx, by)
+        var points: list[int] = []
+        var multiplicities: list[str] = []
+        var knots: list[str] = []
+        for t in 0..<controls:
+            let along = float(t) / float(controls - 1)
+            points.append(point(self.writer, ax + (bx - ax) * along, ay + (by - ay) * along, 0.0))
+            multiplicities.append("2" if t == 0 or t == controls - 1 else "1")
+            knots.append(f"{along:.6f}")
+        let curve = self.writer.add(f"B_SPLINE_CURVE_WITH_KNOTS('',1,({references(points)}),.UNSPECIFIED.,.F.,.F.,({multiplicities.join(",")}),({knots.join(",")}),.UNSPECIFIED.)")
+        return self.writer.add(f"EDGE_CURVE('',#{va},#{vb},#{curve},.T.)")
+
+    func loop(self, edges: list[int], outer: bool) -> int:
+        var uses: list[int] = []
+        for edge in edges:
+            uses.append(self.writer.add(f"ORIENTED_EDGE('',*,*,#{edge},.T.)"))
+        let loop = self.writer.add(f"EDGE_LOOP('',({references(uses)}))")
+        return self.writer.add(f"{"FACE_OUTER_BOUND" if outer else "FACE_BOUND"}('',#{loop},.T.)")
+
+    func polygon(self, corners: list[(float, float)], outer: bool) -> int:
+        var edges: list[int] = []
+        for at in 0..<corners.length:
+            edges.append(self.line(corners[at], corners[(at + 1) % corners.length]))
+        return self.loop(edges, outer)
+
+    func face(self, bounds: list[int]):
+        if self.plane == 0:
+            let origin = point(self.writer, 0.0, 0.0, 0.0)
+            let axis = self.writer.add("DIRECTION('',(0.,0.,1.))")
+            let reference = self.writer.add("DIRECTION('',(1.,0.,0.))")
+            let placement = self.writer.add(f"AXIS2_PLACEMENT_3D('',#{origin},#{axis},#{reference})")
+            self.plane = self.writer.add(f"PLANE('',#{placement})")
+        self.faces.append(self.writer.add(f"ADVANCED_FACE('',({references(bounds)}),#{self.plane},.T.)"))
+
+    func text(self) -> str:
+        _ = self.writer.add(f"OPEN_SHELL('',({references(self.faces)}))")
+        return self.writer.text()
+
+func square(x: float, y: float, size: float, clockwise: bool) -> list[(float, float)]:
+    let corners = [(x, y), (x + size, y), (x + size, y + size), (x, y + size)]
+    return [corners[3], corners[2], corners[1], corners[0]] if clockwise else corners
+
+func big_faces() -> str:
+    let faces = Faces()
+    var plate = [faces.polygon(square(0.0, 0.0, 30.0, false), true)]
+    for i in 0..<25:
+        for j in 0..<20:
+            plate.append(faces.polygon(square(1.0 + 1.15 * float(i), 1.0 + 1.15 * float(j), 0.5, true), false))
+    faces.face(plate)
+    var outline: list[(float, float)] = []
+    for (x, y) in star(5000):
+        outline.append((40.0 + x, y))
+    faces.face([faces.polygon(outline, true)])
+    let edges = [faces.spline((50.0, 0.0), (52.0, 0.0), 2000), faces.line((52.0, 0.0), (51.0, 1.0)), faces.line((51.0, 1.0), (50.0, 0.0))]
+    faces.face([faces.loop(edges, true)])
+    return faces.text()

@@ -1,6 +1,0 @@
-# luce-step's Luce regressions.
-from step_tests import step_tests
-
-pub func main(arguments: list[str]) -> int!:
-    step_tests()
-    return 0
