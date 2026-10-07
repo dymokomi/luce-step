@@ -1,11 +1,14 @@
 # luce-step's regressions: faceted and rational surfaces, B-reps, assembly placements,
 # colors, reflected transforms, import tolerance, and faces of any size. The large
 # fixtures are generated (generated.luc) into a temporary directory.
-from luce_std import files
+from luce_std import files, process
 from generated import write_fixtures
 from step_tests import step_tests
 
 pub func main(arguments: list[str]) -> int!:
+    # run from this program's own directory, wherever luc test starts it
+    if let here = process.variable("LUC_TEST_DIR"):
+        process.change_directory(here)
     with files.TemporaryDirectory() as directory:
         write_fixtures(directory.path())
         step_tests(directory.path())
