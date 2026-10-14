@@ -4,6 +4,7 @@ import ownership
 import memory
 import strings
 from luce_geocore.geocore import Vector3, invalid
+from luce_std import math
 from luce_geocore.core.growing import Growing
 from luce_cad.model import CadModel, BrepModel, brep_model_type, CadTolerances
 from document import Document, Entity, arg, inner, count_args, ref_id, integer, knots, component
@@ -61,7 +62,10 @@ pub func read_brep(data: Document, model: interop.Reference[CadModel], tolerance
                     tolerance = value
                     declared = true
     if tolerance_override > 0.0: tolerance = tolerance_override
-    let boundary = try interop.Reference[BrepModel].adopt(new BrepModel(tolerance, tolerances) in memory.heap, brep_model_type, memory.heap)
+    # The body works to the project's tolerances; the file's (or the one
+    # given for this import) is its vertices' precision.
+    let precision = tolerance if tolerance_override > 0.0 else math.max(tolerances.positional, tolerance)
+    let boundary = try interop.Reference[BrepModel].adopt(new BrepModel(tolerances) in memory.heap, brep_model_type, memory.heap)
     defer boundary.release()
     var vertices = try IdMap()
     defer vertices.close()
@@ -84,11 +88,12 @@ pub func read_brep(data: Document, model: interop.Reference[CadModel], tolerance
         if entity.kind == "VERTEX_POINT":
             let vertex = try boundary.value().add_vertex(try data.point(try ref_id(try arg(entity.args, 1))))
             # Edges join their vertices within the project's positional
-            # tolerance, however tight the file says it is: points within it
-            # are one point (luce-cad KERNEL-ROBUSTNESS.md 4.6). How far each
-            # really lies is measured after the read (CadModeling.rechecked).
-            # A tolerance given for this import is the one it is read to.
-            if tolerance_override <= 0.0 and tolerances.positional > tolerance: try boundary.value().set_vertex_precision(vertex, tolerances.positional)
+            # tolerance, however tight the file says it is, or within the
+            # file's when it is looser: points within it are one point
+            # (luce-cad KERNEL-ROBUSTNESS.md 4.6). How far each really lies
+            # is measured after the read (CadModeling.rechecked). A tolerance
+            # given for this import is the one it is read to.
+            try boundary.value().set_vertex_precision(vertex, precision)
             try vertices.put(entity.id, vertex)
     for entity in data.records[..<data.count]:
         if entity.kind != "EDGE_CURVE":

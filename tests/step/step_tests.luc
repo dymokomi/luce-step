@@ -62,10 +62,13 @@ pub func step_tests(scratch: str) -> unit!:
     assert(Step.decode_model(precise, 0.0, tight).face_count() == 3) # Within the 1e-6 fallback.
     let strict = precise.replace("DATA;", "DATA;#500=UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(0.0000001),#501,'','');")
     assert(Step.decode_model(strict).face_count() == 3) # Within P.
+    # An import's own tolerance below the fallback stays strict, down to
+    # the project's resolution R (points within R are one point): under the
+    # tight project's (R = 1e-8), not the default's (R = 1e-5).
     rejected = false
-    _ = Step.decode_model(strict, 0.0000001) catch failure: rejected = true
-    assert(rejected) # An import's own tolerance below the fallback stays strict.
-    assert(Step.decode_model(strict, 0.000001).face_count() == 3)
+    _ = Step.decode_model(strict, 0.0000001, tight) catch failure: rejected = true
+    assert(rejected)
+    assert(Step.decode_model(strict, 0.000001, tight).face_count() == 3)
     for value in [-0.01, 0.0000000001, 1.01]:
         rejected = false
         _ = Step.decode_model(text, value) catch failure: rejected = true
