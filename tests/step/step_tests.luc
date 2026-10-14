@@ -2,6 +2,7 @@
 ## surface-only rational B-splines and import tolerance.
 from luce_std import files
 from luce_step.step import Step
+from luce_cad.model import CadTolerances
 from luce_geocore.geocore import Vector3, Mesh
 from checks import near, manifold
 
@@ -41,23 +42,29 @@ pub func step_tests(scratch: str) -> unit!:
         near(colored.attribute_value(cd, face, 0), 0.929412 if cap else 0.172549)
         near(colored.attribute_value(cd, face, 1), 0.807843 if cap else 0.172549)
         near(colored.attribute_value(cd, face, 2), 0.764706 if cap else 0.172549)
-    # Source uncertainty remains authoritative unless this import overrides it.
+    # Vertices join within the project's positional tolerance P however
+    # tight the file is (its looser edges are found by CadModeling.rechecked
+    # afterwards); within a tighter project, or an import's own tolerance,
+    # the file's uncertainty decides.
     let text = files.read_text("fixtures/cylinder.step").replace("(2.,0.,0.)", "(2.00005,0.,0.)")
+    assert(Step.decode_model(text).face_count() == 3) # Within P = 0.01.
+    let tight = CadTolerances(positional = 0.00001, fit = 0.000001)
     var rejected = false
-    _ = Step.decode_model(text) catch failure: rejected = true
+    _ = Step.decode_model(text, 0.0, tight) catch failure: rejected = true
     assert(rejected)
-    assert(Step.decode_model(text, 0.0001).face_count() == 3)
+    assert(Step.decode_model(text, 0.0001, tight).face_count() == 3)
     let declared = text.replace("DATA;", "DATA;#500=UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(0.0001),#501,'','');")
-    assert(Step.decode_model(declared).face_count() == 3)
+    assert(Step.decode_model(declared, 0.0, tight).face_count() == 3)
     rejected = false
     _ = Step.decode_model(declared, 0.000001) catch failure: rejected = true
     assert(rejected) # Explicit tighter settings must not become max(file, user).
     let precise = files.read_text("fixtures/cylinder.step").replace("(2.,0.,0.)", "(2.0000005,0.,0.)")
-    assert(Step.decode_model(precise).face_count() == 3) # Undeclared 1e-6 fallback.
+    assert(Step.decode_model(precise, 0.0, tight).face_count() == 3) # Within the 1e-6 fallback.
     let strict = precise.replace("DATA;", "DATA;#500=UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(0.0000001),#501,'','');")
+    assert(Step.decode_model(strict).face_count() == 3) # Within P.
     rejected = false
-    _ = Step.decode_model(strict) catch failure: rejected = true
-    assert(rejected) # Source uncertainty below the fallback must remain strict.
+    _ = Step.decode_model(strict, 0.0000001) catch failure: rejected = true
+    assert(rejected) # An import's own tolerance below the fallback stays strict.
     assert(Step.decode_model(strict, 0.000001).face_count() == 3)
     for value in [-0.01, 0.0000000001, 1.01]:
         rejected = false
